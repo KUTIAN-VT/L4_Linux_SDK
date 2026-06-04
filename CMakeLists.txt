@@ -51,4 +51,5 @@ include_directories(com)
 link_directories(com)
 
 add_subdirectory(app)
+add_subdirectory(examples)
 add_subdirectory(daemon)
