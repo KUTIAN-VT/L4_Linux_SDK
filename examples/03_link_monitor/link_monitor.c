@@ -60,6 +60,32 @@ static const char *dir_name(uint8_t dir)
     }
 }
 
+static const char *band_name(uint8_t band)
+{
+    switch (band) {
+    case BB_BAND_1G:
+        return "1G";
+    case BB_BAND_2G:
+        return "2G";
+    case BB_BAND_5G:
+        return "5G";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static const char *band_mode_name(uint8_t mode)
+{
+    switch (mode) {
+    case 0:
+        return "MANUAL";
+    case 1:
+        return "AUTO";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 static void print_mac(const bb_mac_t *mac)
 {
     for (int i = 0; i < BB_MAC_LEN; ++i) {
@@ -103,6 +129,7 @@ static void usage(const char *prog)
     printf("  -M              query BB_GET_MCS for TX and RX\n");
     printf("  -P              query BB_GET_CUR_POWER\n");
     printf("  -C              query BB_GET_CHAN_INFO\n");
+    printf("  -B              query BB_GET_BAND_INFO\n");
     printf("  -T              query BB_GET_THROUGHPUT for TX and RX\n");
     printf("  -h              show this help\n");
 }
@@ -139,9 +166,11 @@ static void print_status(const bb_get_status_out_t *status)
     printf("\n");
 
     printf("\nslot link status:\n");
-    for (int i = 0; i < BB_SLOT_MAX; ++i) {
+    for (int i = 0; i < (status->mode == BB_MODE_SINGLE_USER ? 1 : BB_SLOT_MAX); ++i) {
         const bb_link_status_t *link = &status->link_status[i];
-        if (link->state == BB_LINK_STATE_IDLE && link->rx_mcs == 0 && link->pair_state == 0) {
+        if (link->state != BB_LINK_STATE_IDLE &&
+            link->state != BB_LINK_STATE_LOCK &&
+            link->state != BB_LINK_STATE_CONNECT) {
             continue;
         }
 
@@ -321,6 +350,30 @@ static int query_chan_info(bb_dev_handle_t *handle)
     return 0;
 }
 
+static int query_band_info(bb_dev_handle_t *handle)
+{
+    bb_get_band_info_in_t input;
+    bb_get_band_info_out_t output;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    ret = bb_ioctl(handle, BB_GET_BAND_INFO, &input, &output);
+    if (ret) {
+        printf("BB_GET_BAND_INFO failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_GET_BAND_INFO]\n");
+    printf("band_mode=%s(%u) work_band=%s(%u)\n",
+           band_mode_name(output.band_mode),
+           output.band_mode,
+           band_name(output.work_band),
+           output.work_band);
+    return 0;
+}
+
 static int query_throughput(bb_dev_handle_t *handle, int slot)
 {
     bb_get_throughput_in_t input;
@@ -365,6 +418,7 @@ int main(int argc, char **argv)
     int do_mcs = 0;
     int do_power = 0;
     int do_chan = 0;
+    int do_band = 0;
     int do_throughput = 0;
     int opt;
     int ret = 0;
@@ -373,7 +427,7 @@ int main(int argc, char **argv)
     bb_demo_context_t ctx;
     bb_get_status_out_t status;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMPCT")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMPCBT")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -400,6 +454,7 @@ int main(int argc, char **argv)
             do_mcs = 1;
             do_power = 1;
             do_chan = 1;
+            do_band = 1;
             do_throughput = 1;
             break;
         case 'S':
@@ -420,6 +475,9 @@ int main(int argc, char **argv)
         case 'C':
             do_chan = 1;
             break;
+        case 'B':
+            do_band = 1;
+            break;
         case 'T':
             do_throughput = 1;
             break;
@@ -430,13 +488,14 @@ int main(int argc, char **argv)
     }
 
     if (!do_status && !do_user_quality && !do_peer_quality && !do_mcs &&
-        !do_power && !do_chan && !do_throughput) {
+        !do_power && !do_chan && !do_band && !do_throughput) {
         do_status = 1;
         do_user_quality = 1;
         do_peer_quality = 1;
         do_mcs = 1;
         do_power = 1;
         do_chan = 1;
+        do_band = 1;
         do_throughput = 1;
     }
 
@@ -509,6 +568,13 @@ int main(int argc, char **argv)
 
     if (do_chan) {
         ret = query_chan_info(ctx.handle);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_band) {
+        ret = query_band_info(ctx.handle);
         if (ret) {
             goto done;
         }
