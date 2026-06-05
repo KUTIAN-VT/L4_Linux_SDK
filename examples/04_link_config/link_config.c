@@ -23,6 +23,7 @@ static void usage(const char *prog)
     printf("  -w <bandwidth>  set BB_SET_BANDWIDTH, 0-5: 1.25M/2.5M/5M/10M/20M/40M\n");
     printf("  -M <0|1>        set BB_SET_MCS_MODE, 1=auto, 0=manual\n");
     printf("  -m <mcs>        set BB_SET_MCS, range: 0-%d\n", BB_PHY_MCS_MAX - 1);
+    printf("  -F <0|1>        set BB_SET_FRAME_CHANGE, only valid in SINGLE_USER mode\n");
     printf("  -h              show this help\n");
 }
 
@@ -141,6 +142,40 @@ static const char *bandwidth_name(int bandwidth)
     default:
         return "UNKNOWN";
     }
+}
+
+static const char *mode_name(int mode)
+{
+    switch (mode) {
+    case BB_MODE_SINGLE_USER:
+        return "SINGLE_USER";
+    case BB_MODE_MULTI_USER:
+        return "MULTI_USER";
+    case BB_MODE_RELAY:
+        return "RELAY";
+    case BB_MODE_DIRECTOR:
+        return "DIRECTOR";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status)
+{
+    bb_get_status_in_t input;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(status, 0, sizeof(*status));
+
+    input.user_bmp = 0xffff;
+    ret = bb_ioctl(handle, BB_GET_STATUS, &input, status);
+    if (ret) {
+        printf("BB_GET_STATUS failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    return 0;
 }
 
 static int set_band_mode(bb_dev_handle_t *handle, int auto_mode)
@@ -269,6 +304,32 @@ static int set_mcs(bb_dev_handle_t *handle, int slot, int mcs)
     return ret;
 }
 
+static int set_frame_change(bb_dev_handle_t *handle, int mode)
+{
+    bb_get_status_out_t status;
+    bb_set_frame_change_t input;
+    int ret;
+
+    ret = read_status(handle, &status);
+    if (ret) {
+        return ret;
+    }
+
+    if (status.mode != BB_MODE_SINGLE_USER) {
+        printf("BB_SET_FRAME_CHANGE requires SINGLE_USER mode, current mode=%s(%u)\n",
+               mode_name(status.mode),
+               status.mode);
+        return -1;
+    }
+
+    memset(&input, 0, sizeof(input));
+    input.mode = (uint8_t)mode;
+
+    ret = bb_ioctl(handle, BB_SET_FRAME_CHANGE, &input, NULL);
+    printf("BB_SET_FRAME_CHANGE mode=%u ret=%d\n", input.mode, ret);
+    return ret;
+}
+
 int main(int argc, char **argv)
 {
     const char *addr = "127.0.0.1";
@@ -284,6 +345,7 @@ int main(int argc, char **argv)
     int bandwidth = 0;
     int mcs_mode = 0;
     int mcs = 0;
+    int frame_change_mode = 0;
     int do_chan_mode = 0;
     int do_chan = 0;
     int do_band_mode = 0;
@@ -292,11 +354,12 @@ int main(int argc, char **argv)
     int do_bandwidth = 0;
     int do_mcs_mode = 0;
     int do_mcs = 0;
+    int do_frame_change = 0;
     int opt;
     int ret = 0;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:C:c:d:B:b:W:w:M:m:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:C:c:d:B:b:W:w:M:m:F:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -372,6 +435,12 @@ int main(int argc, char **argv)
             }
             do_mcs = 1;
             break;
+        case 'F':
+            if (parse_int_range(optarg, 0, 1, "frame change mode", &frame_change_mode)) {
+                return -1;
+            }
+            do_frame_change = 1;
+            break;
         default:
             usage(argv[0]);
             return -1;
@@ -379,7 +448,8 @@ int main(int argc, char **argv)
     }
 
     if (!do_chan_mode && !do_chan && !do_band_mode && !do_band &&
-        !do_bandwidth_mode && !do_bandwidth && !do_mcs_mode && !do_mcs) {
+        !do_bandwidth_mode && !do_bandwidth && !do_mcs_mode && !do_mcs &&
+        !do_frame_change) {
         printf("no link config action specified\n");
         usage(argv[0]);
         return -1;
@@ -441,6 +511,13 @@ int main(int argc, char **argv)
 
     if (do_mcs) {
         ret = set_mcs(ctx.handle, slot, mcs);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_frame_change) {
+        ret = set_frame_change(ctx.handle, frame_change_mode);
         if (ret) {
             goto done;
         }

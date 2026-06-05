@@ -1,8 +1,8 @@
 # 04_link_config 图传链路配置示例
 
-`l4_link_config` 用于设置图传链路的频段、信道、频宽和 MCS 配置。它和 `03_link_monitor` 配套使用：`03_link_monitor` 负责读取链路状态，`04_link_config` 负责下发链路配置。
+`l4_link_config` 用于设置图传链路的频段、信道、频宽、MCS 和帧结构配置。它和 `03_link_monitor` 配套使用：`03_link_monitor` 负责读取链路状态，`04_link_config` 负责下发链路配置。
 
-这个示例当前实现八个设置命令：
+这个示例当前实现九个设置命令：
 
 | 命令字 | 作用 |
 | --- | --- |
@@ -14,6 +14,7 @@
 | `BB_SET_BANDWIDTH` | 手动设置目标频宽 |
 | `BB_SET_MCS_MODE` | 设置 MCS 自动/手动模式 |
 | `BB_SET_MCS` | 手动设置目标 MCS |
+| `BB_SET_FRAME_CHANGE` | 运行中改变帧结构，仅 SINGLE_USER 模式 |
 
 ## 常用命令
 
@@ -57,13 +58,21 @@
 
 这里先把 slot 0 的 MCS 模式设置为手动，再把目标 MCS 设置为 SDK 枚举值 `6`。
 
+### 设置帧结构切换
+
+```sh
+./l4_link_config -F 1
+```
+
+这里 `-F 1` 表示执行帧结构切换，`-F 0` 表示恢复原始帧结构。程序会先读取 `BB_GET_STATUS`，只有当前模式是 `BB_MODE_SINGLE_USER` 时才会调用 `BB_SET_FRAME_CHANGE`。
+
 ### 同时设置频段、信道、频宽和 MCS
 
 ```sh
 ./l4_link_config -B 0 -b 2g -C 0 -d rx -c 3 -s 0 -W 0 -w 4 -M 0 -m 6
 ```
 
-程序会按固定顺序执行：频段模式、频段、信道模式、信道、频宽模式、频宽、MCS 模式、MCS。
+程序会按固定顺序执行：频段模式、频段、信道模式、信道、频宽模式、频宽、MCS 模式、MCS。如果指定 `-F`，会在 MCS 后执行帧结构切换。
 
 ## 参数说明
 
@@ -82,6 +91,7 @@
 | `-w <bandwidth>` | 调用 `BB_SET_BANDWIDTH`，范围 `0-5` |
 | `-M <0|1>` | 调用 `BB_SET_MCS_MODE`，`1` 自动，`0` 手动 |
 | `-m <mcs>` | 调用 `BB_SET_MCS`，范围 `0-24` |
+| `-F <0|1>` | 调用 `BB_SET_FRAME_CHANGE`，`1` 执行帧结构切换，`0` 恢复原始帧结构，仅 `BB_MODE_SINGLE_USER` 支持 |
 | `-h` | 打印帮助信息 |
 
 如果没有指定任何设置动作，程序只打印帮助并返回错误，避免误操作。
@@ -213,6 +223,29 @@ bb_ioctl(handle, BB_SET_MCS, &input, NULL);
 
 注意：`-m` 使用的是 `bb_phy_mcs_e` 的枚举值，不是直接显示的调制档位名字。比如 `-m 0` 表示 `BB_PHY_MCS_NEG_2`，`-m 2` 表示 `BB_PHY_MCS_0`。
 
+### `BB_SET_FRAME_CHANGE`
+
+```c
+bb_get_status_in_t status_input;
+bb_get_status_out_t status;
+bb_set_frame_change_t input;
+
+bb_ioctl(handle, BB_GET_STATUS, &status_input, &status);
+if (status.mode != BB_MODE_SINGLE_USER) {
+    return -1;
+}
+
+input.mode = mode;
+bb_ioctl(handle, BB_SET_FRAME_CHANGE, &input, NULL);
+```
+
+| 参数 | 字段 | 含义 |
+| --- | --- | --- |
+| `-F 1` | `mode = 1` | 执行帧结构切换 |
+| `-F 0` | `mode = 0` | 恢复原始帧结构 |
+
+`BB_SET_FRAME_CHANGE` 仅支持 `BB_MODE_SINGLE_USER`。示例程序会在调用前读取 `BB_GET_STATUS`，如果当前模式不是 `SINGLE_USER`，会直接报错退出，不下发 `BB_SET_FRAME_CHANGE`。
+
 ## 执行流程
 
 执行：
@@ -246,6 +279,8 @@ BB_SET_MCS_MODE
     |
 BB_SET_MCS
     |
+BB_SET_FRAME_CHANGE（仅指定 -F 时，且必须是 SINGLE_USER 模式）
+    |
 关闭设备连接
 ```
 
@@ -277,8 +312,8 @@ BB_SET_MCS
 
 ### 示例程序不会自动下发远端配置
 
-这个示例只实现列出的八个 `BB_SET_*` 命令。它不会额外调用 `BB_SET_REMOTE`。
+这个示例只实现列出的九个 `BB_SET_*` 命令。它不会额外调用 `BB_SET_REMOTE`。
 
 ## 一句话总结
 
-`l4_link_config` 做的事情就是：连接 daemon，打开指定 8030 设备，然后按参数下发频段、信道、频宽和 MCS 相关配置。
+`l4_link_config` 做的事情就是：连接 daemon，打开指定 8030 设备，然后按参数下发频段、信道、频宽、MCS 和帧结构相关配置。
