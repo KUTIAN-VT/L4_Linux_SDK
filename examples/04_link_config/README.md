@@ -1,8 +1,8 @@
 # 04_link_config 图传链路配置示例
 
-`l4_link_config` 用于设置图传链路的频段和信道配置。它和 `03_link_monitor` 配套使用：`03_link_monitor` 负责读取链路状态，`04_link_config` 负责下发链路配置。
+`l4_link_config` 用于设置图传链路的频段、信道、频宽和 MCS 配置。它和 `03_link_monitor` 配套使用：`03_link_monitor` 负责读取链路状态，`04_link_config` 负责下发链路配置。
 
-这个示例当前实现四个设置命令：
+这个示例当前实现八个设置命令：
 
 | 命令字 | 作用 |
 | --- | --- |
@@ -10,6 +10,10 @@
 | `BB_SET_BAND` | 手动设置目标工作频段 |
 | `BB_SET_CHAN_MODE` | 设置信道自动/手动模式 |
 | `BB_SET_CHAN` | 手动设置目标信道索引 |
+| `BB_SET_BANDWIDTH_MODE` | 设置频宽自动/手动模式 |
+| `BB_SET_BANDWIDTH` | 手动设置目标频宽 |
+| `BB_SET_MCS_MODE` | 设置 MCS 自动/手动模式 |
+| `BB_SET_MCS` | 手动设置目标 MCS |
 
 ## 常用命令
 
@@ -37,13 +41,29 @@
 
 这里先把信道模式设置为手动，再把 RX 方向的目标信道索引设置为 `3`。
 
-### 同时设置频段和信道
+### 手动设置目标频宽
 
 ```sh
-./l4_link_config -B 0 -b 2g -C 0 -d rx -c 3
+./l4_link_config -s 0 -W 0 -d rx -w 4
 ```
 
-程序会按固定顺序执行：先设置频段模式，再设置频段，然后设置信道模式，最后设置信道。
+这里先把 slot 0 的频宽模式设置为手动，再把 RX 方向的目标频宽设置为 `BB_BW_20M`。
+
+### 手动设置目标 MCS
+
+```sh
+./l4_link_config -s 0 -M 0 -m 6
+```
+
+这里先把 slot 0 的 MCS 模式设置为手动，再把目标 MCS 设置为 SDK 枚举值 `6`。
+
+### 同时设置频段、信道、频宽和 MCS
+
+```sh
+./l4_link_config -B 0 -b 2g -C 0 -d rx -c 3 -s 0 -W 0 -w 4 -M 0 -m 6
+```
+
+程序会按固定顺序执行：频段模式、频段、信道模式、信道、频宽模式、频宽、MCS 模式、MCS。
 
 ## 参数说明
 
@@ -52,11 +72,16 @@
 | `-a <addr>` | daemon 地址，默认 `127.0.0.1` |
 | `-p <port>` | daemon 端口，默认 `BB_PORT_DEFAULT` |
 | `-i <index>` | 设备序号，默认 `0` |
+| `-s <slot>` | slot 编号，默认 `0`，用于频宽和 MCS 配置 |
 | `-B <0|1>` | 调用 `BB_SET_BAND_MODE`，`1` 自动，`0` 手动 |
 | `-b <band>` | 调用 `BB_SET_BAND`，支持 `1g`、`2g`、`5g` 或 `0`、`1`、`2` |
 | `-C <0|1>` | 调用 `BB_SET_CHAN_MODE`，`1` 自动，`0` 手动 |
 | `-c <index>` | 调用 `BB_SET_CHAN`，设置信道索引，范围 `0-255` |
-| `-d <dir>` | `-c` 使用的信道方向，支持 `tx`、`rx` 或 `0`、`1`，默认 `rx` |
+| `-d <dir>` | `-c` 和 `-w` 使用的方向，支持 `tx`、`rx` 或 `0`、`1`，默认 `rx` |
+| `-W <0|1>` | 调用 `BB_SET_BANDWIDTH_MODE`，`1` 自动，`0` 手动 |
+| `-w <bandwidth>` | 调用 `BB_SET_BANDWIDTH`，范围 `0-5` |
+| `-M <0|1>` | 调用 `BB_SET_MCS_MODE`，`1` 自动，`0` 手动 |
+| `-m <mcs>` | 调用 `BB_SET_MCS`，范围 `0-24` |
 | `-h` | 打印帮助信息 |
 
 如果没有指定任何设置动作，程序只打印帮助并返回错误，避免误操作。
@@ -120,12 +145,80 @@ bb_ioctl(handle, BB_SET_CHAN, &input, NULL);
 
 `chan_index` 是否是设备支持的预置信道，由设备侧判断。示例程序只检查它是否在 `0-255` 范围内。
 
+### `BB_SET_BANDWIDTH_MODE`
+
+```c
+bb_set_bandwidth_mode_t input;
+input.slot = slot;
+input.mode = mode;
+bb_ioctl(handle, BB_SET_BANDWIDTH_MODE, &input, NULL);
+```
+
+| 参数 | 字段 | 含义 |
+| --- | --- | --- |
+| `-s <slot>` | `slot = slot` | 目标 slot |
+| `-W 1` | `mode = 1` | 频宽自动 |
+| `-W 0` | `mode = 0` | 频宽手动 |
+
+### `BB_SET_BANDWIDTH`
+
+```c
+bb_set_bandwidth_t input;
+input.slot = slot;
+input.dir = dir;
+input.bandwidth = bandwidth;
+bb_ioctl(handle, BB_SET_BANDWIDTH, &input, NULL);
+```
+
+| 参数 | 字段 | 含义 |
+| --- | --- | --- |
+| `-s <slot>` | `slot = slot` | 目标 slot |
+| `-d tx` 或 `-d 0` | `dir = BB_DIR_TX` | TX 方向 |
+| `-d rx` 或 `-d 1` | `dir = BB_DIR_RX` | RX 方向 |
+| `-w 0` | `bandwidth = BB_BW_1_25M` | 1.25M |
+| `-w 1` | `bandwidth = BB_BW_2_5M` | 2.5M |
+| `-w 2` | `bandwidth = BB_BW_5M` | 5M |
+| `-w 3` | `bandwidth = BB_BW_10M` | 10M |
+| `-w 4` | `bandwidth = BB_BW_20M` | 20M |
+| `-w 5` | `bandwidth = BB_BW_40M` | 40M |
+
+### `BB_SET_MCS_MODE`
+
+```c
+bb_set_mcs_mode_t input;
+input.slot = slot;
+input.auto_mode = auto_mode;
+bb_ioctl(handle, BB_SET_MCS_MODE, &input, NULL);
+```
+
+| 参数 | 字段 | 含义 |
+| --- | --- | --- |
+| `-s <slot>` | `slot = slot` | 目标 slot |
+| `-M 1` | `auto_mode = 1` | MCS 自适应 |
+| `-M 0` | `auto_mode = 0` | MCS 手动 |
+
+### `BB_SET_MCS`
+
+```c
+bb_set_mcs_t input;
+input.slot = slot;
+input.mcs = mcs;
+bb_ioctl(handle, BB_SET_MCS, &input, NULL);
+```
+
+| 参数 | 字段 | 含义 |
+| --- | --- | --- |
+| `-s <slot>` | `slot = slot` | 目标 slot |
+| `-m <mcs>` | `mcs = mcs` | SDK MCS 枚举值 |
+
+注意：`-m` 使用的是 `bb_phy_mcs_e` 的枚举值，不是直接显示的调制档位名字。比如 `-m 0` 表示 `BB_PHY_MCS_NEG_2`，`-m 2` 表示 `BB_PHY_MCS_0`。
+
 ## 执行流程
 
 执行：
 
 ```sh
-./l4_link_config -B 0 -b 2g -C 0 -d rx -c 3
+./l4_link_config -B 0 -b 2g -C 0 -d rx -c 3 -s 0 -W 0 -w 4 -M 0 -m 6
 ```
 
 程序内部大致按下面流程运行：
@@ -145,6 +238,14 @@ BB_SET_CHAN_MODE
     |
 BB_SET_CHAN
     |
+BB_SET_BANDWIDTH_MODE
+    |
+BB_SET_BANDWIDTH
+    |
+BB_SET_MCS_MODE
+    |
+BB_SET_MCS
+    |
 关闭设备连接
 ```
 
@@ -152,32 +253,32 @@ BB_SET_CHAN
 
 ## 和 `03_link_monitor` 配合使用
 
-设置完成后，可以用 `03_link_monitor` 读取当前信道信息：
+设置完成后，可以用 `03_link_monitor` 读取当前链路信息：
 
 ```sh
-./l4_link_monitor -C
+./l4_link_monitor -C -M -T
 ```
 
-它会调用 `BB_GET_CHAN_INFO`，打印信道数量、自动模式、ACS 信道、工作信道和预置信道列表。
+它会读取信道信息、MCS 和吞吐信息，用于辅助确认配置效果。
 
 ## 新手最容易混淆的点
 
 ### 自动模式和手动设置不是一回事
 
-`-B 1` 或 `-C 1` 只是把设备切到自动模式。手动指定频段或信道时，通常要先设置 `-B 0` 或 `-C 0`。
+`-B 1`、`-C 1`、`-W 1`、`-M 1` 只是把设备切到自动模式。手动指定频段、信道、频宽或 MCS 时，通常要先设置对应模式为 `0`。
 
-### `-c` 是信道索引，不是频率值
+### 程序不会自动补发模式切换
 
-`BB_SET_CHAN` 使用的是设备预置信道索引，不是 KHz 或 MHz 频率。可以先用 `l4_link_monitor -C` 查看设备返回的信道列表。
+如果只执行 `-w 4`，程序只调用 `BB_SET_BANDWIDTH`，不会自动调用 `BB_SET_BANDWIDTH_MODE 0`。需要手动模式时，请显式写成 `-W 0 -w 4`。
 
-### `-d` 只影响 `BB_SET_CHAN`
+### `-d` 同时服务信道和频宽
 
-`-d` 用于填写 `bb_set_chan_t.chan_dir`。它不会影响 `BB_SET_BAND` 或 `BB_SET_BAND_MODE`。
+`-d` 会用于 `BB_SET_CHAN` 的 `chan_dir`，也会用于 `BB_SET_BANDWIDTH` 的 `dir`。如果同一条命令里同时设置 `-c` 和 `-w`，二者会使用同一个方向。
 
 ### 示例程序不会自动下发远端配置
 
-这个示例只实现 `BB_SET_CHAN_MODE`、`BB_SET_CHAN`、`BB_SET_BAND_MODE`、`BB_SET_BAND`。它不会额外调用 `BB_SET_REMOTE`。
+这个示例只实现列出的八个 `BB_SET_*` 命令。它不会额外调用 `BB_SET_REMOTE`。
 
 ## 一句话总结
 
-`l4_link_config` 做的事情就是：连接 daemon，打开指定 8030 设备，然后按参数下发频段模式、目标频段、信道模式和目标信道配置。
+`l4_link_config` 做的事情就是：连接 daemon，打开指定 8030 设备，然后按参数下发频段、信道、频宽和 MCS 相关配置。

@@ -183,7 +183,7 @@ bb_ioctl(handle, BB_GET_STATUS, &input, &status);
 | --- | --- |
 | 基本状态 | 角色、模式、同步状态、slot bitmap、本机 MAC |
 | slot link status | 每个非空 slot 的链路状态、MCS、对频状态和对端 MAC |
-| user phy status | 每个非空 user 的收发频点、带宽和 MCS |
+| user phy status | 按 AP/DEV 角色映射后的 RX/TX 频点、带宽、TX MCS 和时隙配比 |
 
 ## 5. 状态输出怎么看
 
@@ -220,7 +220,7 @@ AP 或 DEV 存在链路状态时，会打印类似：
 
 ```text
 slot link status:
-  slot[0]: state=CONNECT(2), rx_mcs=4, pair=1, peer_mac=xx:xx:xx:xx:xx:xx
+  slot[0]: state=CONNECT(2), rx_mcs_raw=4, rx_mcs_real=2, pair=1, peer_mac=xx:xx:xx:xx:xx:xx
 ```
 
 常见链路状态：
@@ -233,17 +233,19 @@ slot link status:
 | `UNKNOWN` | 示例代码暂时没有识别出的状态值 |
 
 程序会跳过完全空闲且没有有效信息的 slot，所以没打印某个 slot 通常表示它当前没有有效链路状态。
+`rx_mcs_raw` 是 SDK 原始值，真实 MCS 按 `rx_mcs_raw - 2` 输出为 `rx_mcs_real`。
 
 ### user phy status
 
-如果某个 user 有收发物理层状态，会打印类似：
+程序会按当前设备角色把物理 user 重新映射成逻辑 RX/TX 方向，只读取对应方向的对象：AP 的 RX 使用 `BB_USER_0`，TX 使用 `BB_USER_BR_CS`；DEV 的 RX 使用 `BB_USER_BR_CS`，TX 使用 `BB_USER_0`。
 
 ```text
 user phy status:
-  user[0]: tx_freq=1400000KHz tx_mcs=4 tx_bw=20 | rx_freq=1400000KHz rx_bw=20
+  RX: user=0 source=rx freq=1400000KHz bw=20 tintlv_enable=1 tintlv_len=3 tintlv_num=1 bw_mode=Y24X2 major_dir=DEV->AP
+  TX: user=8 source=tx freq=1400000KHz mcs_raw=4 mcs_real=2 bw=20 tintlv_enable=1 tintlv_len=3 tintlv_num=1 bw_mode=Y24X2 major_dir=DEV->AP
 ```
 
-这些字段用于观察当前收发频点、MCS 和带宽。程序会跳过收发频点都为 0 的 user。
+查看 TX 状态时只参考 `tx` 对象，并输出 `mcs_raw` 和修正后的 `mcs_real=mcs_raw-2`。查看 RX 状态时只参考 `rx` 对象，RX 端物理 MCS 字段不作为有效 MCS 输出。
 
 ## 6. 新手最容易混淆的点
 

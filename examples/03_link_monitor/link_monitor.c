@@ -86,6 +86,133 @@ static const char *band_mode_name(uint8_t mode)
     }
 }
 
+static const char *bandwidth_name(uint8_t bandwidth)
+{
+    switch (bandwidth) {
+    case BB_BW_1_25M:
+        return "1.25MHz";
+    case BB_BW_2_5M:
+        return "2.5MHz";
+    case BB_BW_5M:
+        return "5MHz";
+    case BB_BW_10M:
+        return "10MHz";
+    case BB_BW_20M:
+        return "20MHz";
+    case BB_BW_40M:
+        return "40MHz";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static const char *tintlv_mode_name(uint8_t tintlv_len, uint8_t tintlv_num)
+{
+    if (tintlv_len == 3 && tintlv_num == 1) {
+        return "Y24X2";
+    }
+
+    if (tintlv_len == 2 && tintlv_num == 0) {
+        return "Y12X1";
+    }
+
+    return "UNKNOWN";
+}
+
+static const char *tintlv_major_dir(uint8_t tintlv_len, uint8_t tintlv_num)
+{
+    if (tintlv_len == 3 && tintlv_num == 1) {
+        return "DEV->AP";
+    }
+
+    if (tintlv_len == 2 && tintlv_num == 0) {
+        return "AP->DEV";
+    }
+
+    return "UNKNOWN";
+}
+
+typedef struct {
+    int user;
+    const char *source;
+    const bb_phy_status_t *phy;
+} user_phy_view_t;
+
+static int get_user_phy_view(const bb_get_status_out_t *status, int tx, user_phy_view_t *view)
+{
+    switch (status->role) {
+    case BB_ROLE_AP:
+        view->user = tx ? BB_USER_BR_CS : BB_USER_0;
+        view->source = tx ? "tx" : "rx";
+        break;
+    case BB_ROLE_DEV:
+        view->user = tx ? BB_USER_0 : BB_USER_BR_CS;
+        view->source = tx ? "tx" : "rx";
+        break;
+    default:
+        return -1;
+    }
+
+    view->phy = tx ? &status->user_status[view->user].tx_status :
+                     &status->user_status[view->user].rx_status;
+    return 0;
+}
+
+static void print_user_phy_view(const char *dir, const user_phy_view_t *view, int tx)
+{
+    const bb_phy_status_t *phy = view->phy;
+    const char *mode = tintlv_mode_name(phy->tintlv_len, phy->tintlv_num);
+    const char *major_dir = tintlv_major_dir(phy->tintlv_len, phy->tintlv_num);
+
+    if (tx) {
+        printf("  %s: user=%d source=%s freq=%uKHz mcs_raw=%u mcs_real=%d bw=%s(%u) "
+               "tintlv_enable=%u tintlv_len=%u tintlv_num=%u bw_mode=%s major_dir=%s\n",
+               dir,
+               view->user,
+               view->source,
+               phy->freq_khz,
+               phy->mcs,
+               (int)phy->mcs - 2,
+               bandwidth_name(phy->bandwidth),
+               phy->bandwidth,
+               phy->tintlv_enable,
+               phy->tintlv_len,
+               phy->tintlv_num,
+               mode,
+               major_dir);
+        return;
+    }
+
+    printf("  %s: user=%d source=%s freq=%uKHz bw=%s(%u) tintlv_enable=%u tintlv_len=%u "
+           "tintlv_num=%u bw_mode=%s major_dir=%s\n",
+           dir,
+           view->user,
+           view->source,
+           phy->freq_khz,
+           bandwidth_name(phy->bandwidth),
+           phy->bandwidth,
+           phy->tintlv_enable,
+           phy->tintlv_len,
+           phy->tintlv_num,
+           mode,
+           major_dir);
+}
+
+static void print_user_phy_status(const bb_get_status_out_t *status)
+{
+    user_phy_view_t rx_view;
+    user_phy_view_t tx_view;
+
+    printf("\nuser phy status:\n");
+    if (get_user_phy_view(status, 0, &rx_view) || get_user_phy_view(status, 1, &tx_view)) {
+        printf("  unavailable: unsupported role=%u\n", status->role);
+        return;
+    }
+
+    print_user_phy_view("RX", &rx_view, 0);
+    print_user_phy_view("TX", &tx_view, 1);
+}
+
 static void print_mac(const bb_mac_t *mac)
 {
     for (int i = 0; i < BB_MAC_LEN; ++i) {
@@ -174,15 +301,18 @@ static void print_status(const bb_get_status_out_t *status)
             continue;
         }
 
-        printf("  slot[%d]: state=%s(%u), rx_mcs=%u, pair=%u, peer_mac=",
+        printf("  slot[%d]: state=%s(%u), rx_mcs_raw=%u, rx_mcs_real=%d, pair=%u, peer_mac=",
                i,
                link_state_name(link->state),
                link->state,
                link->rx_mcs,
+               (int)link->rx_mcs - 2,
                link->pair_state);
         print_mac(&link->peer_mac);
         printf("\n");
     }
+
+    print_user_phy_status(status);
 }
 
 static int query_status(bb_dev_handle_t *handle)

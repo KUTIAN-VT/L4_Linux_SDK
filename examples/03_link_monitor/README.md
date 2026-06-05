@@ -57,7 +57,7 @@
 
 | API | 主要输出 |
 | --- | --- |
-| `BB_GET_STATUS` | 角色、模式、本机 MAC、slot 链路状态、peer MAC |
+| `BB_GET_STATUS` | 角色、模式、本机 MAC、slot 链路状态、peer MAC、映射后的 user phy status |
 | `BB_GET_USER_QUALITY` | 指定 user 的 SNR 原始值、换算 dB、LDPC、A/B 路 gain |
 | `BB_GET_PEER_QUALITY` | 指定 slot 对端数据通道质量，SNR 按 `10log10(snr/36)` 换算 dB |
 | `BB_GET_MCS` | 指定 slot 的 TX/RX MCS 原始值、真实值 `raw-2` 和理论吞吐 |
@@ -78,6 +78,9 @@
 
 - SNR 输出 `snr_raw` 和 `snr_db`；`snr_db` 使用公式 `10log10(snr_raw/36)` 换算。
 - MCS 输出 `mcs_raw` 和 `mcs_real`；真实 MCS 为 `mcs_raw - 2`。
+- `slot link status` 中的 `rx_mcs_raw` 也按 `rx_mcs_raw - 2` 输出真实值 `rx_mcs_real`。
+- `user phy status` 会按角色映射逻辑 RX/TX：AP RX=`BB_USER_0.rx`、AP TX=`BB_USER_BR_CS.tx`、DEV RX=`BB_USER_BR_CS.rx`、DEV TX=`BB_USER_0.tx`。RX 只输出 RX 对象，不使用 RX 端物理 MCS 字段。
+- `tintlv_len=3,tintlv_num=1` 显示为 `Y24X2`，大带宽方向 `DEV->AP`；`tintlv_len=2,tintlv_num=0` 显示为 `Y12X1`，大带宽方向 `AP->DEV`。
 
 ## slot 和 user
 

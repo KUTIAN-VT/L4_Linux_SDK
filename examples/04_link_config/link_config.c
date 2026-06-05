@@ -13,11 +13,16 @@ static void usage(const char *prog)
     printf("  -a <addr>       host address, default: 127.0.0.1\n");
     printf("  -p <port>       host port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
+    printf("  -s <slot>       slot id for bandwidth/MCS, default: 0\n");
     printf("  -B <0|1>        set BB_SET_BAND_MODE, 1=auto, 0=manual\n");
     printf("  -b <band>       set BB_SET_BAND, band: 1g/2g/5g or 0/1/2\n");
     printf("  -C <0|1>        set BB_SET_CHAN_MODE, 1=auto, 0=manual\n");
     printf("  -c <index>      set BB_SET_CHAN channel index, range: 0-255\n");
-    printf("  -d <dir>        channel direction for -c, tx/rx or 0/1, default: rx\n");
+    printf("  -d <dir>        direction for -c/-w, tx/rx or 0/1, default: rx\n");
+    printf("  -W <0|1>        set BB_SET_BANDWIDTH_MODE, 1=auto, 0=manual\n");
+    printf("  -w <bandwidth>  set BB_SET_BANDWIDTH, 0-5: 1.25M/2.5M/5M/10M/20M/40M\n");
+    printf("  -M <0|1>        set BB_SET_MCS_MODE, 1=auto, 0=manual\n");
+    printf("  -m <mcs>        set BB_SET_MCS, range: 0-%d\n", BB_PHY_MCS_MAX - 1);
     printf("  -h              show this help\n");
 }
 
@@ -118,6 +123,26 @@ static const char *band_name(int band)
     }
 }
 
+static const char *bandwidth_name(int bandwidth)
+{
+    switch (bandwidth) {
+    case BB_BW_1_25M:
+        return "1.25M";
+    case BB_BW_2_5M:
+        return "2.5M";
+    case BB_BW_5M:
+        return "5M";
+    case BB_BW_10M:
+        return "10M";
+    case BB_BW_20M:
+        return "20M";
+    case BB_BW_40M:
+        return "40M";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 static int set_band_mode(bb_dev_handle_t *handle, int auto_mode)
 {
     bb_set_band_mode_t input;
@@ -178,25 +203,100 @@ static int set_chan(bb_dev_handle_t *handle, int chan_dir, int chan_index)
     return ret;
 }
 
+static int set_bandwidth_mode(bb_dev_handle_t *handle, int slot, int mode)
+{
+    bb_set_bandwidth_mode_t input;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    input.slot = (uint8_t)slot;
+    input.mode = (uint8_t)mode;
+
+    ret = bb_ioctl(handle, BB_SET_BANDWIDTH_MODE, &input, NULL);
+    printf("BB_SET_BANDWIDTH_MODE slot=%u mode=%u ret=%d\n", input.slot, input.mode, ret);
+    return ret;
+}
+
+static int set_bandwidth(bb_dev_handle_t *handle, int slot, int dir, int bandwidth)
+{
+    bb_set_bandwidth_t input;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    input.slot = (uint8_t)slot;
+    input.dir = (uint8_t)dir;
+    input.bandwidth = (uint8_t)bandwidth;
+
+    ret = bb_ioctl(handle, BB_SET_BANDWIDTH, &input, NULL);
+    printf("BB_SET_BANDWIDTH slot=%u dir=%s(%u) bandwidth=%s(%u) ret=%d\n",
+           input.slot,
+           dir_name(input.dir),
+           input.dir,
+           bandwidth_name(input.bandwidth),
+           input.bandwidth,
+           ret);
+    return ret;
+}
+
+static int set_mcs_mode(bb_dev_handle_t *handle, int slot, int auto_mode)
+{
+    bb_set_mcs_mode_t input;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    input.slot = (uint8_t)slot;
+    input.auto_mode = (uint8_t)auto_mode;
+
+    ret = bb_ioctl(handle, BB_SET_MCS_MODE, &input, NULL);
+    printf("BB_SET_MCS_MODE slot=%u auto_mode=%u ret=%d\n",
+           input.slot,
+           input.auto_mode,
+           ret);
+    return ret;
+}
+
+static int set_mcs(bb_dev_handle_t *handle, int slot, int mcs)
+{
+    bb_set_mcs_t input;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    input.slot = (uint8_t)slot;
+    input.mcs = (uint8_t)mcs;
+
+    ret = bb_ioctl(handle, BB_SET_MCS, &input, NULL);
+    printf("BB_SET_MCS slot=%u mcs=%u ret=%d\n", input.slot, input.mcs, ret);
+    return ret;
+}
+
 int main(int argc, char **argv)
 {
     const char *addr = "127.0.0.1";
     int port = BB_PORT_DEFAULT;
     int dev_index = 0;
+    int slot = 0;
     int chan_mode = 0;
     int chan_index = 0;
     int chan_dir = BB_DIR_RX;
     int band_mode = 0;
     int target_band = 0;
+    int bandwidth_mode = 0;
+    int bandwidth = 0;
+    int mcs_mode = 0;
+    int mcs = 0;
     int do_chan_mode = 0;
     int do_chan = 0;
     int do_band_mode = 0;
     int do_band = 0;
+    int do_bandwidth_mode = 0;
+    int do_bandwidth = 0;
+    int do_mcs_mode = 0;
+    int do_mcs = 0;
     int opt;
     int ret = 0;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:C:c:d:B:b:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:C:c:d:B:b:W:w:M:m:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -211,6 +311,11 @@ int main(int argc, char **argv)
             break;
         case 'i':
             if (parse_int_range(optarg, 0, 255, "device index", &dev_index)) {
+                return -1;
+            }
+            break;
+        case 's':
+            if (parse_int_range(optarg, 0, BB_SLOT_MAX - 1, "slot", &slot)) {
                 return -1;
             }
             break;
@@ -243,13 +348,38 @@ int main(int argc, char **argv)
             }
             do_band = 1;
             break;
+        case 'W':
+            if (parse_auto_mode(optarg, "bandwidth mode", &bandwidth_mode)) {
+                return -1;
+            }
+            do_bandwidth_mode = 1;
+            break;
+        case 'w':
+            if (parse_int_range(optarg, 0, BB_BW_MAX - 1, "bandwidth", &bandwidth)) {
+                return -1;
+            }
+            do_bandwidth = 1;
+            break;
+        case 'M':
+            if (parse_auto_mode(optarg, "mcs auto_mode", &mcs_mode)) {
+                return -1;
+            }
+            do_mcs_mode = 1;
+            break;
+        case 'm':
+            if (parse_int_range(optarg, 0, BB_PHY_MCS_MAX - 1, "mcs", &mcs)) {
+                return -1;
+            }
+            do_mcs = 1;
+            break;
         default:
             usage(argv[0]);
             return -1;
         }
     }
 
-    if (!do_chan_mode && !do_chan && !do_band_mode && !do_band) {
+    if (!do_chan_mode && !do_chan && !do_band_mode && !do_band &&
+        !do_bandwidth_mode && !do_bandwidth && !do_mcs_mode && !do_mcs) {
         printf("no link config action specified\n");
         usage(argv[0]);
         return -1;
@@ -283,6 +413,34 @@ int main(int argc, char **argv)
 
     if (do_chan) {
         ret = set_chan(ctx.handle, chan_dir, chan_index);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_bandwidth_mode) {
+        ret = set_bandwidth_mode(ctx.handle, slot, bandwidth_mode);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_bandwidth) {
+        ret = set_bandwidth(ctx.handle, slot, chan_dir, bandwidth);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_mcs_mode) {
+        ret = set_mcs_mode(ctx.handle, slot, mcs_mode);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_mcs) {
+        ret = set_mcs(ctx.handle, slot, mcs);
         if (ret) {
             goto done;
         }
