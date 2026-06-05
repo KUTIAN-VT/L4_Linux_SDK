@@ -107,36 +107,40 @@ static void usage(const char *prog)
     printf("  -h              show this help\n");
 }
 
-static int query_status(bb_dev_handle_t *handle)
+static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status)
 {
     bb_get_status_in_t input;
-    bb_get_status_out_t status;
     int ret;
 
     memset(&input, 0, sizeof(input));
-    memset(&status, 0, sizeof(status));
+    memset(status, 0, sizeof(*status));
 
     input.user_bmp = 0xffff;
-    ret = bb_ioctl(handle, BB_GET_STATUS, &input, &status);
+    ret = bb_ioctl(handle, BB_GET_STATUS, &input, status);
     if (ret) {
         printf("BB_GET_STATUS failed, ret=%d\n", ret);
         return ret;
     }
 
+    return 0;
+}
+
+static void print_status(const bb_get_status_out_t *status)
+{
     printf("\n[BB_GET_STATUS]\n");
-    printf("role        : %s (%u)\n", role_name(status.role), status.role);
-    printf("mode        : %s (%u)\n", mode_name(status.mode), status.mode);
-    printf("sync_mode   : %u\n", status.sync_mode);
-    printf("sync_master : %u\n", status.sync_master);
-    printf("cfg_sbmp    : 0x%02x\n", status.cfg_sbmp);
-    printf("rt_sbmp     : 0x%02x\n", status.rt_sbmp);
+    printf("role        : %s (%u)\n", role_name(status->role), status->role);
+    printf("mode        : %s (%u)\n", mode_name(status->mode), status->mode);
+    printf("sync_mode   : %u\n", status->sync_mode);
+    printf("sync_master : %u\n", status->sync_master);
+    printf("cfg_sbmp    : 0x%02x\n", status->cfg_sbmp);
+    printf("rt_sbmp     : 0x%02x\n", status->rt_sbmp);
     printf("local_mac   : ");
-    print_mac(&status.mac);
+    print_mac(&status->mac);
     printf("\n");
 
     printf("\nslot link status:\n");
     for (int i = 0; i < BB_SLOT_MAX; ++i) {
-        const bb_link_status_t *link = &status.link_status[i];
+        const bb_link_status_t *link = &status->link_status[i];
         if (link->state == BB_LINK_STATE_IDLE && link->rx_mcs == 0 && link->pair_state == 0) {
             continue;
         }
@@ -150,8 +154,32 @@ static int query_status(bb_dev_handle_t *handle)
         print_mac(&link->peer_mac);
         printf("\n");
     }
+}
 
+static int query_status(bb_dev_handle_t *handle)
+{
+    bb_get_status_out_t status;
+    int ret;
+
+    ret = read_status(handle, &status);
+    if (ret) {
+        return ret;
+    }
+
+    print_status(&status);
     return 0;
+}
+
+static int link_ready_for_slot(const bb_get_status_out_t *status, int slot)
+{
+    const bb_link_status_t *link;
+
+    if (status->role != BB_ROLE_AP && status->role != BB_ROLE_DEV) {
+        return 0;
+    }
+
+    link = &status->link_status[slot];
+    return link->pair_state || link->state == BB_LINK_STATE_CONNECT;
 }
 
 static int query_user_quality(bb_dev_handle_t *handle, int user)
@@ -340,7 +368,10 @@ int main(int argc, char **argv)
     int do_throughput = 0;
     int opt;
     int ret = 0;
+    int need_link_detail;
+    int link_ready = 1;
     bb_demo_context_t ctx;
+    bb_get_status_out_t status;
 
     while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMPCT")) != -1) {
         switch (opt) {
@@ -424,35 +455,52 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    if (do_status) {
-        ret = query_status(ctx.handle);
+    need_link_detail = do_user_quality || do_peer_quality || do_mcs || do_power || do_throughput;
+    if (do_status || need_link_detail) {
+        ret = read_status(ctx.handle, &status);
         if (ret) {
             goto done;
         }
+
+        if (do_status) {
+            print_status(&status);
+        }
+
+        if (need_link_detail) {
+            link_ready = link_ready_for_slot(&status, slot);
+            if (!link_ready) {
+                if (!do_status) {
+                    print_status(&status);
+                }
+
+                printf("\nslot[%d] is not paired/connected, skip link detail queries\n", slot);
+                printf("link detail APIs require pair_state=1 or state=CONNECT\n");
+            }
+        }
     }
 
-    if (do_user_quality) {
+    if (do_user_quality && link_ready) {
         ret = query_user_quality(ctx.handle, user);
         if (ret) {
             goto done;
         }
     }
 
-    if (do_peer_quality) {
+    if (do_peer_quality && link_ready) {
         ret = query_peer_quality(ctx.handle, slot);
         if (ret) {
             goto done;
         }
     }
 
-    if (do_mcs) {
+    if (do_mcs && link_ready) {
         ret = query_mcs(ctx.handle, slot);
         if (ret) {
             goto done;
         }
     }
 
-    if (do_power) {
+    if (do_power && link_ready) {
         ret = query_cur_power(ctx.handle, user);
         if (ret) {
             goto done;
@@ -466,7 +514,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (do_throughput) {
+    if (do_throughput && link_ready) {
         ret = query_throughput(ctx.handle, slot);
         if (ret) {
             goto done;

@@ -59,6 +59,13 @@
 | `BB_GET_THROUGHPUT` | 指定 slot 的 TX/RX 物理吞吐和实际承载吞吐 |
 
 
+
+## 读取前置条件
+
+`BB_GET_USER_QUALITY`、`BB_GET_PEER_QUALITY`、`BB_GET_MCS`、`BB_GET_CUR_POWER`、`BB_GET_THROUGHPUT` 这些链路细节只有在图传已经对频/连接后才读取。程序会先读取 `BB_GET_STATUS`，确认指定 slot 满足 `pair_state=1` 或 `state=CONNECT`；如果不满足，会打印当前状态并跳过链路细节查询。
+
+`BB_GET_STATUS` 和 `BB_GET_CHAN_INFO` 可作为基础状态信息单独读取。
+
 ## 数值换算
 
 - SNR 输出 `snr_raw` 和 `snr_db`；`snr_db` 使用公式 `10log10(snr_raw/36)` 换算。
