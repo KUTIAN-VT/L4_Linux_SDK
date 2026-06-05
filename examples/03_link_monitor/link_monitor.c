@@ -1,0 +1,481 @@
+#include "bb_demo_common.h"
+
+#include "getopt.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static const char *role_name(uint8_t role)
+{
+    switch (role) {
+    case BB_ROLE_AP:
+        return "AP";
+    case BB_ROLE_DEV:
+        return "DEV";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static const char *mode_name(uint8_t mode)
+{
+    switch (mode) {
+    case BB_MODE_SINGLE_USER:
+        return "SINGLE_USER";
+    case BB_MODE_MULTI_USER:
+        return "MULTI_USER";
+    case BB_MODE_RELAY:
+        return "RELAY";
+    case BB_MODE_DIRECTOR:
+        return "DIRECTOR";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static const char *link_state_name(uint8_t state)
+{
+    switch (state) {
+    case BB_LINK_STATE_IDLE:
+        return "IDLE";
+    case BB_LINK_STATE_LOCK:
+        return "LOCK";
+    case BB_LINK_STATE_CONNECT:
+        return "CONNECT";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static const char *dir_name(uint8_t dir)
+{
+    switch (dir) {
+    case BB_DIR_TX:
+        return "TX";
+    case BB_DIR_RX:
+        return "RX";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static void print_mac(const bb_mac_t *mac)
+{
+    for (int i = 0; i < BB_MAC_LEN; ++i) {
+        printf("%s%02x", i == 0 ? "" : ":", mac->addr[i]);
+    }
+}
+
+static double snr_to_db(uint16_t snr)
+{
+    if (snr == 0) {
+        return 0.0;
+    }
+
+    return 10.0 * log10((double)snr / 36.0);
+}
+
+static void print_quality(const char *prefix, const bb_quality_t *quality)
+{
+    printf("%s snr_raw=%u snr_db=%.2f dB ldpc=%u/%u gain_a=%u gain_b=%u\n",
+           prefix,
+           quality->snr,
+           snr_to_db(quality->snr),
+           quality->ldpc_err,
+           quality->ldpc_num,
+           quality->gain_a,
+           quality->gain_b);
+}
+
+static void usage(const char *prog)
+{
+    printf("Usage: %s [options]\n", prog);
+    printf("  -a <addr>       host address, default: 127.0.0.1\n");
+    printf("  -p <port>       host port, default: %d\n", BB_PORT_DEFAULT);
+    printf("  -i <index>      device index, default: 0\n");
+    printf("  -s <slot>       slot id, default: 0; DEV uses slot 0 as AP\n");
+    printf("  -u <user>       physical user id, default: 0\n");
+    printf("  -A              query all link information, default action\n");
+    printf("  -S              query BB_GET_STATUS\n");
+    printf("  -Q              query BB_GET_USER_QUALITY\n");
+    printf("  -q              query BB_GET_PEER_QUALITY\n");
+    printf("  -M              query BB_GET_MCS for TX and RX\n");
+    printf("  -P              query BB_GET_CUR_POWER\n");
+    printf("  -C              query BB_GET_CHAN_INFO\n");
+    printf("  -T              query BB_GET_THROUGHPUT for TX and RX\n");
+    printf("  -h              show this help\n");
+}
+
+static int query_status(bb_dev_handle_t *handle)
+{
+    bb_get_status_in_t input;
+    bb_get_status_out_t status;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&status, 0, sizeof(status));
+
+    input.user_bmp = 0xffff;
+    ret = bb_ioctl(handle, BB_GET_STATUS, &input, &status);
+    if (ret) {
+        printf("BB_GET_STATUS failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_GET_STATUS]\n");
+    printf("role        : %s (%u)\n", role_name(status.role), status.role);
+    printf("mode        : %s (%u)\n", mode_name(status.mode), status.mode);
+    printf("sync_mode   : %u\n", status.sync_mode);
+    printf("sync_master : %u\n", status.sync_master);
+    printf("cfg_sbmp    : 0x%02x\n", status.cfg_sbmp);
+    printf("rt_sbmp     : 0x%02x\n", status.rt_sbmp);
+    printf("local_mac   : ");
+    print_mac(&status.mac);
+    printf("\n");
+
+    printf("\nslot link status:\n");
+    for (int i = 0; i < BB_SLOT_MAX; ++i) {
+        const bb_link_status_t *link = &status.link_status[i];
+        if (link->state == BB_LINK_STATE_IDLE && link->rx_mcs == 0 && link->pair_state == 0) {
+            continue;
+        }
+
+        printf("  slot[%d]: state=%s(%u), rx_mcs=%u, pair=%u, peer_mac=",
+               i,
+               link_state_name(link->state),
+               link->state,
+               link->rx_mcs,
+               link->pair_state);
+        print_mac(&link->peer_mac);
+        printf("\n");
+    }
+
+    return 0;
+}
+
+static int query_user_quality(bb_dev_handle_t *handle, int user)
+{
+    bb_get_user_quality_in_t input;
+    bb_get_user_quality_out_t output;
+    char prefix[32];
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    input.user_bmp = (uint16_t)(1u << user);
+    input.average = 0;
+    ret = bb_ioctl(handle, BB_GET_USER_QUALITY, &input, &output);
+    if (ret) {
+        printf("BB_GET_USER_QUALITY failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_GET_USER_QUALITY]\n");
+    snprintf(prefix, sizeof(prefix), "user[%d]:", user);
+    print_quality(prefix, &output.qualities[user]);
+    return 0;
+}
+
+static int query_peer_quality(bb_dev_handle_t *handle, int slot)
+{
+    bb_get_peer_quality_in_t input;
+    bb_get_peer_quality_out_t output;
+    char prefix[32];
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    input.slot_bmp = (uint8_t)(1u << slot);
+    input.arverage = 0;
+    ret = bb_ioctl(handle, BB_GET_PEER_QUALITY, &input, &output);
+    if (ret) {
+        printf("BB_GET_PEER_QUALITY failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_GET_PEER_QUALITY]\n");
+    snprintf(prefix, sizeof(prefix), "slot[%d]:", slot);
+    print_quality(prefix, &output.qualities[slot]);
+    return 0;
+}
+
+static int query_mcs_dir(bb_dev_handle_t *handle, int slot, uint8_t dir)
+{
+    bb_get_mcs_in_t input;
+    bb_get_mcs_out_t output;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    input.slot = (uint8_t)slot;
+    input.dir = dir;
+    ret = bb_ioctl(handle, BB_GET_MCS, &input, &output);
+    if (ret) {
+        printf("BB_GET_MCS %s failed, ret=%d\n", dir_name(dir), ret);
+        return ret;
+    }
+
+    printf("  %s: mcs_raw=%u mcs_real=%d theory_throughput=%u kbps\n",
+           dir_name(dir),
+           output.mcs,
+           (int)output.mcs - 2,
+           output.throughput);
+    return 0;
+}
+
+static int query_mcs(bb_dev_handle_t *handle, int slot)
+{
+    int ret;
+
+    printf("\n[BB_GET_MCS] slot=%d\n", slot);
+    ret = query_mcs_dir(handle, slot, BB_DIR_TX);
+    if (ret) {
+        return ret;
+    }
+
+    return query_mcs_dir(handle, slot, BB_DIR_RX);
+}
+
+static int query_cur_power(bb_dev_handle_t *handle, int user)
+{
+    bb_get_cur_pwr_in_t input;
+    bb_get_cur_pwr_out_t output;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    input.usr = (uint8_t)user;
+    ret = bb_ioctl(handle, BB_GET_CUR_POWER, &input, &output);
+    if (ret) {
+        printf("BB_GET_CUR_POWER failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_GET_CUR_POWER]\n");
+    printf("user[%u]: power=%u\n", output.usr, output.pwr);
+    return 0;
+}
+
+static int query_chan_info(bb_dev_handle_t *handle)
+{
+    bb_get_chan_info_out_t output;
+    int chan_num;
+    int ret;
+
+    memset(&output, 0, sizeof(output));
+    ret = bb_ioctl(handle, BB_GET_CHAN_INFO, NULL, &output);
+    if (ret) {
+        printf("BB_GET_CHAN_INFO failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_GET_CHAN_INFO]\n");
+    printf("chan_num=%u auto_mode=%u acs_chan=%u work_chan=%u\n",
+           output.chan_num,
+           output.auto_mode,
+           output.acs_chan,
+           output.work_chan);
+
+    chan_num = output.chan_num;
+    if (chan_num > BB_CONFIG_MAX_CHAN_NUM) {
+        printf("chan_num exceeds max, clamp to %d\n", BB_CONFIG_MAX_CHAN_NUM);
+        chan_num = BB_CONFIG_MAX_CHAN_NUM;
+    }
+
+    for (int i = 0; i < chan_num; ++i) {
+        printf("  chan[%d]: freq=%u KHz power=%d dbm\n", i, output.freq[i], output.power[i]);
+    }
+    return 0;
+}
+
+static int query_throughput(bb_dev_handle_t *handle, int slot)
+{
+    bb_get_throughput_in_t input;
+    bb_get_throughput_out_t output;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    input.slot = (uint8_t)slot;
+    input.dir_bmp = (uint8_t)((1u << BB_DIR_TX) | (1u << BB_DIR_RX));
+    ret = bb_ioctl(handle, BB_GET_THROUGHPUT, &input, &output);
+    if (ret) {
+        printf("BB_GET_THROUGHPUT failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_GET_THROUGHPUT] slot=%d\n", slot);
+    for (int dir = 0; dir < BB_DIR_MAX; ++dir) {
+        if ((input.dir_bmp & (1u << dir)) == 0) {
+            continue;
+        }
+
+        printf("  %s: phy=%u real=%u\n",
+               dir_name((uint8_t)dir),
+               output.throughput[dir].phy_throughput,
+               output.throughput[dir].real_throughput);
+    }
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    const char *addr = "127.0.0.1";
+    int port = BB_PORT_DEFAULT;
+    int dev_index = 0;
+    int slot = 0;
+    int user = 0;
+    int do_status = 0;
+    int do_user_quality = 0;
+    int do_peer_quality = 0;
+    int do_mcs = 0;
+    int do_power = 0;
+    int do_chan = 0;
+    int do_throughput = 0;
+    int opt;
+    int ret = 0;
+    bb_demo_context_t ctx;
+
+    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMPCT")) != -1) {
+        switch (opt) {
+        case 'h':
+            usage(argv[0]);
+            return 0;
+        case 'a':
+            addr = optarg;
+            break;
+        case 'p':
+            port = (int)strtol(optarg, NULL, 10);
+            break;
+        case 'i':
+            dev_index = (int)strtol(optarg, NULL, 10);
+            break;
+        case 's':
+            slot = (int)strtol(optarg, NULL, 10);
+            break;
+        case 'u':
+            user = (int)strtol(optarg, NULL, 10);
+            break;
+        case 'A':
+            do_status = 1;
+            do_user_quality = 1;
+            do_peer_quality = 1;
+            do_mcs = 1;
+            do_power = 1;
+            do_chan = 1;
+            do_throughput = 1;
+            break;
+        case 'S':
+            do_status = 1;
+            break;
+        case 'Q':
+            do_user_quality = 1;
+            break;
+        case 'q':
+            do_peer_quality = 1;
+            break;
+        case 'M':
+            do_mcs = 1;
+            break;
+        case 'P':
+            do_power = 1;
+            break;
+        case 'C':
+            do_chan = 1;
+            break;
+        case 'T':
+            do_throughput = 1;
+            break;
+        default:
+            usage(argv[0]);
+            return -1;
+        }
+    }
+
+    if (!do_status && !do_user_quality && !do_peer_quality && !do_mcs &&
+        !do_power && !do_chan && !do_throughput) {
+        do_status = 1;
+        do_user_quality = 1;
+        do_peer_quality = 1;
+        do_mcs = 1;
+        do_power = 1;
+        do_chan = 1;
+        do_throughput = 1;
+    }
+
+    if (slot < 0 || slot >= BB_SLOT_MAX) {
+        printf("invalid slot %d, valid range: 0-%d\n", slot, BB_SLOT_MAX - 1);
+        return -1;
+    }
+
+    if (user < 0 || user >= BB_DATA_USER_MAX) {
+        printf("invalid user %d, valid range: 0-%d\n", user, BB_DATA_USER_MAX - 1);
+        return -1;
+    }
+
+    ret = bb_demo_open(&ctx, addr, port, dev_index);
+    if (ret) {
+        return -1;
+    }
+
+    if (do_status) {
+        ret = query_status(ctx.handle);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_user_quality) {
+        ret = query_user_quality(ctx.handle, user);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_peer_quality) {
+        ret = query_peer_quality(ctx.handle, slot);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_mcs) {
+        ret = query_mcs(ctx.handle, slot);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_power) {
+        ret = query_cur_power(ctx.handle, user);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_chan) {
+        ret = query_chan_info(ctx.handle);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_throughput) {
+        ret = query_throughput(ctx.handle, slot);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    printf("\nl4 link monitor finished\n");
+
+done:
+    bb_demo_close(&ctx);
+    return ret ? -1 : 0;
+}

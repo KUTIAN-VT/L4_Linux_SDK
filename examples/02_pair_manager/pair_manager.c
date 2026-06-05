@@ -22,6 +22,49 @@ static void print_mac(const bb_mac_t *mac)
     }
 }
 
+static int parse_mac(const char *text, bb_mac_t *mac)
+{
+    const char *pos = text;
+    char *end;
+    char sep = 0;
+
+    if (!text || !mac) {
+        return -1;
+    }
+
+    memset(mac, 0, sizeof(*mac));
+    for (int i = 0; i < BB_MAC_LEN; ++i) {
+        long value;
+
+        if (*pos == '\0') {
+            return -1;
+        }
+
+        value = strtol(pos, &end, 16);
+        if (end == pos || end - pos != 2 || value < 0 || value > 0xff) {
+            return -1;
+        }
+
+        mac->addr[i] = (uint8_t)value;
+        if (i == BB_MAC_LEN - 1) {
+            return *end == '\0' ? 0 : -1;
+        }
+
+        if (*end != ':' && *end != '-') {
+            return -1;
+        }
+        if (sep == 0) {
+            sep = *end;
+        } else if (*end != sep) {
+            return -1;
+        }
+
+        pos = end + 1;
+    }
+
+    return -1;
+}
+
 static const char *role_name(uint8_t role)
 {
     switch (role) {
@@ -46,7 +89,7 @@ static void usage(const char *prog)
     printf("  -P            start pair and wait BB_EVENT_PAIR_RESULT\n");
     printf("  -X            stop pair\n");
     printf("  -m            get paired peer mac by role\n");
-    printf("  -A            get AP mac by BB_GET_AP_MAC\n");
+    printf("  -M <mac>      set paired peer mac by role, format: 11:22:33:44\n");
     printf("  -h            show this help\n");
 }
 
@@ -199,6 +242,73 @@ static int get_ap_mac(bb_dev_handle_t *handle)
     return 0;
 }
 
+static int set_ap_mac(bb_dev_handle_t *handle, const bb_mac_t *mac)
+{
+    bb_set_ap_mac_t ap_mac;
+    int ret;
+
+    memset(&ap_mac, 0, sizeof(ap_mac));
+    ap_mac.mac = *mac;
+
+    ret = bb_ioctl(handle, BB_SET_AP_MAC, &ap_mac, NULL);
+    if (ret) {
+        printf("BB_SET_AP_MAC failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_AP_MAC]\n");
+    printf("ap_mac: ");
+    print_mac(&ap_mac.mac);
+    printf("\n");
+    return 0;
+}
+
+static int set_candidates_mac(bb_dev_handle_t *handle, int slot, const bb_mac_t *mac)
+{
+    bb_set_candidate_t candidate;
+    int ret;
+
+    memset(&candidate, 0, sizeof(candidate));
+    candidate.slot = (uint8_t)slot;
+    candidate.mac_num = 1;
+    candidate.mac_tab[0] = *mac;
+
+    ret = bb_ioctl(handle, BB_SET_CANDIDATES, &candidate, NULL);
+    if (ret) {
+        printf("BB_SET_CANDIDATES failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_CANDIDATES]\n");
+    printf("slot: %d mac_num: %u\n", slot, candidate.mac_num);
+    printf("dev_mac[0]: ");
+    print_mac(&candidate.mac_tab[0]);
+    printf("\n");
+    return 0;
+}
+
+static int set_pair_mac(bb_dev_handle_t *handle, int slot, const bb_mac_t *mac)
+{
+    uint8_t role;
+    int ret;
+
+    ret = get_role(handle, &role);
+    if (ret) {
+        return ret;
+    }
+
+    if (role == BB_ROLE_AP) {
+        return set_candidates_mac(handle, slot, mac);
+    }
+
+    if (role == BB_ROLE_DEV) {
+        return set_ap_mac(handle, mac);
+    }
+
+    printf("unsupported role %u, pair mac not set\n", role);
+    return -1;
+}
+
 static int get_pair_result(bb_dev_handle_t *handle, int slot)
 {
     uint8_t role;
@@ -312,12 +422,15 @@ int main(int argc, char **argv)
     int do_start = 0;
     int do_stop = 0;
     int do_get_pair = 0;
-    int do_get_ap_mac = 0;
+    int do_set_mac = 0;
     int opt;
     int ret = 0;
     bb_demo_context_t ctx;
+    bb_mac_t set_mac;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:t:w:PXmA")) != -1) {
+    memset(&set_mac, 0, sizeof(set_mac));
+
+    while ((opt = getopt(argc, argv, "ha:p:i:s:t:w:M:PXm")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -349,8 +462,12 @@ int main(int argc, char **argv)
         case 'm':
             do_get_pair = 1;
             break;
-        case 'A':
-            do_get_ap_mac = 1;
+        case 'M':
+            if (parse_mac(optarg, &set_mac)) {
+                printf("invalid mac '%s', expected format: 11:22:33:44\n", optarg);
+                return -1;
+            }
+            do_set_mac = 1;
             break;
         default:
             usage(argv[0]);
@@ -358,7 +475,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!do_start && !do_stop && !do_get_pair && !do_get_ap_mac) {
+    if (!do_start && !do_stop && !do_get_pair && !do_set_mac) {
         usage(argv[0]);
         return -1;
     }
@@ -389,6 +506,13 @@ int main(int argc, char **argv)
         }
     }
 
+    if (do_set_mac) {
+        ret = set_pair_mac(ctx.handle, slot, &set_mac);
+        if (ret) {
+            goto done;
+        }
+    }
+
     if (do_start) {
         ret = start_pair(ctx.handle, slot, timeout_sec, wait_sec);
         if (ret) {
@@ -403,12 +527,6 @@ int main(int argc, char **argv)
         }
     }
 
-    if (do_get_ap_mac) {
-        ret = get_ap_mac(ctx.handle);
-        if (ret) {
-            goto done;
-        }
-    }
 
     printf("\nl4 pair manager finished\n");
 

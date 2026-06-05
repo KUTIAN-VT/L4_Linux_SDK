@@ -26,7 +26,7 @@
 | `-P` | 启动对频，并等待对频结果事件 |
 | `-X` | 停止当前对频 |
 | `-m` | 查询对频结果和对端 MAC |
-| `-A` | 查询 DEV 当前记录的 AP MAC |
+| `-M <mac>` | 按角色设置对端 MAC |
 
 其它常用参数：
 
@@ -63,7 +63,25 @@
 ./l4_pair_manager -m
 ```
 
-对频成功后，可以用这个命令按当前角色查看对端 MAC：AP 侧查看指定 slot 上的 DEV MAC，DEV 侧查看 AP MAC。
+对频成功后，使用 `-m` 按当前角色查看对端 MAC：AP 侧查看指定 slot 上的 DEV MAC，DEV 侧查看 AP MAC。
+
+### AP 侧手动设置 DEV MAC
+
+```sh
+./l4_pair_manager -M 11:22:33:44 -s 0
+```
+
+意思是：在 AP 侧把 `11:22:33:44` 设置为 `slot 0` 的候选 DEV MAC。内部调用 `BB_SET_CANDIDATES`。
+
+### DEV 侧手动设置 AP MAC
+
+```sh
+./l4_pair_manager -M 11:22:33:44
+```
+
+意思是：在 DEV 侧把 `11:22:33:44` 设置为目标 AP MAC。内部调用 `BB_SET_AP_MAC`。
+
+MAC 是 4 字节格式，支持冒号或横线分隔，例如 `11:22:33:44` 或 `11-22-33-44`。
 
 ### 停止对频
 
@@ -274,6 +292,8 @@ bb_ioctl(handle, BB_SET_PRJ_DISPATCH, &request, NULL);
 
 ## 6. 查询命令怎么看
 
+`-m` 是当前唯一的对频结果查询命令；`-M <mac>` 用于手动设置对端 MAC。
+
 ### `-m` 查询对频结果
 
 ```sh
@@ -293,13 +313,32 @@ bb_ioctl(handle, BB_SET_PRJ_DISPATCH, &request, NULL);
 ./l4_pair_manager -m -s 0
 ```
 
-### `-A` 查询 AP MAC
+### `-M` 设置对端 MAC
+
+`-M` 会先查询当前角色，然后按角色选择设置方式：
+
+| 当前角色 | `-M` 实际调用 | 结果 |
+| --- | --- | --- |
+| AP | `BB_SET_CANDIDATES` | 设置指定 slot 的 DEV 候选 MAC |
+| DEV | `BB_SET_AP_MAC` | 设置目标 AP MAC |
+
+AP 侧示例：
 
 ```sh
-./l4_pair_manager -A
+./l4_pair_manager -M 11:22:33:44 -s 0
 ```
 
-内部调用 `BB_GET_AP_MAC`。它主要给 DEV 侧看，表示 DEV 当前记录的目标 AP MAC。
+DEV 侧示例：
+
+```sh
+./l4_pair_manager -M 11:22:33:44
+```
+
+如果和启动对频一起使用，程序会先写入 MAC，再启动对频：
+
+```sh
+./l4_pair_manager -M 11:22:33:44 -s 0 -P
+```
 
 ## 7. 新手最容易混淆的点
 
@@ -334,7 +373,8 @@ bb_ioctl(handle, BB_SET_PRJ_DISPATCH, &request, NULL);
 | `get_candidates_mac()` | AP 侧查询指定 slot 上的 DEV MAC 列表 |
 | `get_ap_mac()` | DEV 侧查询当前记录的 AP MAC |
 | `get_pair_result()` | 按角色选择 AP 查询 DEV MAC 或 DEV 查询 AP MAC |
+| `set_pair_mac()` | 按角色选择 AP 设置 DEV MAC 或 DEV 设置 AP MAC |
 
 ## 9. 一句话总结
 
-`l4_pair_manager` 做的事情就是：连接设备，判断自己是 AP 还是 DEV，发送启动对频命令，等待设备异步返回对频结果；如果成功，AP 侧读取指定 slot 上的 DEV MAC，DEV 侧读取配对 AP 的 MAC。
+`l4_pair_manager` 做的事情就是：连接设备，判断自己是 AP 还是 DEV，支持启动/停止对频，也支持查询和手动设置对端 MAC；AP 侧通过 slot 管理 DEV MAC，DEV 侧记录目标 AP MAC。

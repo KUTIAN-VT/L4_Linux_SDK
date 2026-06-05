@@ -1,0 +1,71 @@
+# 03_link_monitor 对频后链路信息读取示例
+
+`l4_link_monitor` 用于在 AP 和 DEV 对频完成后读取链路状态、信号质量、MCS、功率、信道和吞吐信息。它适合用作图传链路体检工具。
+
+## 常用命令
+
+```sh
+./l4_link_monitor
+```
+
+默认执行全量查询，等同于 `-A`。
+
+```sh
+./l4_link_monitor -s 0 -T
+```
+
+只查询 slot 0 的 TX/RX 实时吞吐。
+
+```sh
+./l4_link_monitor -s 0 -M
+```
+
+只查询 slot 0 的 TX/RX MCS 和理论吞吐。
+
+```sh
+./l4_link_monitor -u 0 -Q -P
+```
+
+查询 user 0 的用户质量和当前发射功率。
+
+## 参数说明
+
+| 参数 | 作用 |
+| --- | --- |
+| `-a <addr>` | daemon 地址，默认 `127.0.0.1` |
+| `-p <port>` | daemon 端口 |
+| `-i <index>` | 设备序号，默认 `0` |
+| `-s <slot>` | 目标 slot，默认 `0`；DEV 侧 slot 0 表示 AP |
+| `-u <user>` | 物理用户，默认 `0` |
+| `-A` | 查询全部链路信息 |
+| `-S` | 查询 `BB_GET_STATUS` |
+| `-Q` | 查询 `BB_GET_USER_QUALITY` |
+| `-q` | 查询 `BB_GET_PEER_QUALITY` |
+| `-M` | 查询 `BB_GET_MCS` |
+| `-P` | 查询 `BB_GET_CUR_POWER` |
+| `-C` | 查询 `BB_GET_CHAN_INFO` |
+| `-T` | 查询 `BB_GET_THROUGHPUT` |
+
+## 读取的信息
+
+| API | 主要输出 |
+| --- | --- |
+| `BB_GET_STATUS` | 角色、模式、本机 MAC、slot 链路状态、peer MAC |
+| `BB_GET_USER_QUALITY` | 指定 user 的 SNR 原始值、换算 dB、LDPC、A/B 路 gain |
+| `BB_GET_PEER_QUALITY` | 指定 slot 对端数据通道质量，SNR 按 `10log10(snr/36)` 换算 dB |
+| `BB_GET_MCS` | 指定 slot 的 TX/RX MCS 原始值、真实值 `raw-2` 和理论吞吐 |
+| `BB_GET_CUR_POWER` | 指定 user 当前发射功率 |
+| `BB_GET_CHAN_INFO` | 信道数量、自适应模式、ACS 信道、工作信道、频点和扫频能量 |
+| `BB_GET_THROUGHPUT` | 指定 slot 的 TX/RX 物理吞吐和实际承载吞吐 |
+
+
+## 数值换算
+
+- SNR 输出 `snr_raw` 和 `snr_db`；`snr_db` 使用公式 `10log10(snr_raw/36)` 换算。
+- MCS 输出 `mcs_raw` 和 `mcs_real`；真实 MCS 为 `mcs_raw - 2`。
+
+## slot 和 user
+
+AP 侧通常用 `-s <slot>` 指定要查看哪个 DEV 所在的 slot。DEV 侧使用 `-s 0` 查看 AP 方向，因为 SDK 中 `BB_SLOT_AP` 等于 0。
+
+`-u <user>` 用于 `BB_GET_USER_QUALITY` 和 `BB_GET_CUR_POWER`。默认 user 0，只有需要看其它物理用户时才需要修改。
