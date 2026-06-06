@@ -17,5 +17,5 @@ cmake -S "${SDK_ROOT}" -B "${BUILD_DIR}" \
     -DUSING_XDS_HDR=ON
 
 num=$(grep -c processor /proc/cpuinfo)
-cmake --build "${BUILD_DIR}" --target ar8030_client l4_cmd_dbg l4_linux_mvi ota_upgrade daemon -j${num}
+cmake --build "${BUILD_DIR}" --target ar8030_client l4_cmd_dbg l4_linux_mvi ota_upgrade l4_daemon -j${num}
 cmake --install "${BUILD_DIR}"

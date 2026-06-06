@@ -137,9 +137,12 @@ static int log_write(void* pri, void* buff, int len)
 
 void com_log_init(char* file)
 {
-    log_fp = fopen(file, "w");
-    if (!log_fp) {
-        printf("open log file %s , errno = %d\n", file, errno);
+    log_fp = NULL;
+    if (file && file[0]) {
+        log_fp = fopen(file, "w");
+        if (!log_fp) {
+            printf("open log file %s , errno = %d\n", file, errno);
+        }
     }
     bgptr = bg_init(log_write, log_fp, 100 * 1024, 1024);
 }

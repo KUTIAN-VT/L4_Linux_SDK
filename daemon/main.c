@@ -34,6 +34,7 @@
 #endif
 
 #define DEFAULT_UART_ID     1
+#define OPT_LOG_FILE        1000
 
 typedef enum intf_type_e {
     INTF_TYPE_USB,
@@ -58,10 +59,11 @@ static int baudrate = 115200;
 static int parity = 0;
 static int stop_bits = 0;
 static int data_bits = 8;
+static int save_log_file = 0;
 
 void print_help(void)
 {
-    com_log(COM_INIT, "Usage: daemon [options]\n");
+    com_log(COM_INIT, "Usage: l4_daemon [options]\n");
     com_log(COM_INIT, "Options:\n");
     com_log(COM_INIT, "\t-h       Print help info \n");
     com_log(COM_INIT, "\t-p       Port of the rpc socket\n");
@@ -72,6 +74,7 @@ void print_help(void)
     com_log(COM_INIT, "\t-S       Stopbit(0:1 bit,1:1.5 bits,2:2 bits)\n");
     com_log(COM_INIT, "\t-D       Data bits\n");
     com_log(COM_INIT, "\t-l       Log level(0:debug,1:info,2:warn,3:error)\n");
+    com_log(COM_INIT, "\t--log-file Save daemon logs to daemon_log\n");
 }
 
 int reg_8030_dev(rpc_info* prpc)
@@ -152,29 +155,45 @@ int main(int argc, char* argv[])
 {
 #ifndef WIN32
     signal(SIGPIPE, SIG_IGN);
-    mkdir(DAEMON_LOG_PATH, 0777);
 #else
-    _mkdir(DAEMON_LOG_PATH);
     CrashDump crashDump;
 #endif
-    time_t    res = time(NULL);
-    struct tm rettm;
+
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--log-file")) {
+            save_log_file = 1;
+            break;
+        }
+    }
+
+    char* log_file = NULL;
+    char  timebuff[1024];
+    if (save_log_file) {
 #ifndef WIN32
-    localtime_r(&res, &rettm);
+        mkdir(DAEMON_LOG_PATH, 0777);
 #else
-    localtime_s(&rettm, &res);
+        _mkdir(DAEMON_LOG_PATH);
 #endif
-    char timebuff[1024];
-    sprintf(timebuff,
-            "%s/%d-%d-%d %d-%d-%d.log",
-            DAEMON_LOG_PATH,
-            rettm.tm_year + 1900,
-            rettm.tm_mon + 1,
-            rettm.tm_mday,
-            rettm.tm_hour,
-            rettm.tm_min,
-            rettm.tm_sec);
-    com_log_init(timebuff);
+        time_t    res = time(NULL);
+        struct tm rettm;
+#ifndef WIN32
+        localtime_r(&res, &rettm);
+#else
+        localtime_s(&rettm, &res);
+#endif
+        sprintf(timebuff,
+                "%s/%d-%d-%d %d-%d-%d.log",
+                DAEMON_LOG_PATH,
+                rettm.tm_year + 1900,
+                rettm.tm_mon + 1,
+                rettm.tm_mday,
+                rettm.tm_hour,
+                rettm.tm_min,
+                rettm.tm_sec);
+        log_file = timebuff;
+    }
+    com_log_init(log_file);
+
     int c = 0;
     while (1) {
         int                  option_index   = 0;
@@ -188,6 +207,7 @@ int main(int argc, char* argv[])
             {"stop_bits",   required_argument,     0, 'S'},
             {"data_bits",   required_argument,     0, 'D'},
             {"log_level",   required_argument,     0, 'l'},
+            {"log-file",    no_argument,           0, OPT_LOG_FILE},
             { 0,            0,                     0, 0  },
         };
 
@@ -231,6 +251,9 @@ int main(int argc, char* argv[])
         case 'l':
             com_log_set_level("print_level", (int)strtoul(optarg, NULL, 10));
             com_log(COM_INIT, "log level %d", com_log_get_level("print_level"));
+            break;
+        case OPT_LOG_FILE:
+            save_log_file = 1;
             break;
         case 'h':
             print_help();

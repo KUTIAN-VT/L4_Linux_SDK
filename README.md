@@ -2,7 +2,7 @@
 
 This SDK keeps only the files needed to build these Linux targets:
 
-- `daemon`
+- `l4_daemon`
 - `l4_linux_mvi`
 - `libar8030_client.so`
 
@@ -96,7 +96,7 @@ cmake -S L4_Linux_SDK -B L4_Linux_SDK/build/x86_64 \
   -DUSING_8030SDIO=OFF \
   -DUSING_XDS_HDR=ON
 
-cmake --build L4_Linux_SDK/build/x86_64 --target ar8030_client l4_linux_mvi daemon -j
+cmake --build L4_Linux_SDK/build/x86_64 --target ar8030_client l4_linux_mvi l4_daemon -j
 cmake --install L4_Linux_SDK/build/x86_64
 ```
 
@@ -113,7 +113,7 @@ cmake -S L4_Linux_SDK -B L4_Linux_SDK/build/arm64 \
   -DUSING_8030SDIO=OFF \
   -DUSING_XDS_HDR=ON
 
-cmake --build L4_Linux_SDK/build/arm64 --target ar8030_client l4_linux_mvi daemon -j
+cmake --build L4_Linux_SDK/build/arm64 --target ar8030_client l4_linux_mvi l4_daemon -j
 cmake --install L4_Linux_SDK/build/arm64
 ```
 

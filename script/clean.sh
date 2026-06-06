@@ -16,7 +16,7 @@ clean_install_dir() {
             echo "Removing build-installed binaries, libraries, and headers that are writable..."
             rm -f "${install_dir}/bin/l4_linux_mvi"
             rm -f "${install_dir}/bin/L4_Linux_mvi"
-            rm -f "${install_dir}/bin/daemon"
+            rm -f "${install_dir}/bin/l4_daemon"
             rm -rf "${install_dir}/lib"
             rm -rf "${install_dir}/include"
             find "${install_dir}" -type d -empty -delete 2>/dev/null || true
