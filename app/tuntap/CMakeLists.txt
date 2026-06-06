@@ -25,8 +25,7 @@ if(NOT libtuntap_POPULATED)
 endif()
 
 add_executable(l4_tuntap)
-target_sources(l4_tuntap PRIVATE l4_tuntap.cpp)
-target_include_directories(l4_tuntap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(l4_tuntap PRIVATE tuntap.cpp)
 target_link_libraries(l4_tuntap PRIVATE ar8030_client tuntap++ com)
 
 if(NOT WIN32)

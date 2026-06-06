@@ -1,7 +1,7 @@
 ﻿#include "getopt.h"
 
 #include "com_log.h"
-#include "l4_tuntap.h"
+#include "tuntap.h"
 #include <getopt.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -17,13 +17,13 @@ int usage(void)
     printf("This is a test program to demo baseband transport function!\n");
     printf("Option List:\n");
     printf(" -h --help              print usage which you're seeing\n");
-    printf(" -u --user              specify the baseband user id\n");
-    printf(" -p --port              specify the transport id\n");
-    printf(" -i --ip                specify the tun device ip\n");
-    printf(" -d --dev               specify the tun device name\n");
+    printf(" -u --user              specify the baseband user id, default 0\n");
+    printf(" -p --port              specify the transport id, default 3\n");
+    printf(" -i --ip                specify the tap device ip, required\n");
+    printf(" -d --dev               specify the tap device name, default tap0\n");
     printf(" -v --debug             debug mode in ethernet transfer\n");
-    printf(" -r --rx_buf            buffer len of rx\n");
-    printf(" -t --tx_buf            buffer len of tx\n");
+    printf(" -r --rx_buf            buffer len of rx, default 40000\n");
+    printf(" -t --tx_buf            buffer len of tx, default 60000\n");
 
     return 0;
 }
@@ -121,7 +121,7 @@ static void tun_2_bb_thread(bb_tun_cfg& cfg)
     }
  
     while (1) {
-        int rdlen = cfg.dev.read(pkg_buf + PACKET_HEADER_SIZE, cfg.buff_max);
+        int rdlen = cfg.dev->read(pkg_buf + PACKET_HEADER_SIZE, cfg.buff_max);
 
         if (rdlen <= 0) {
             continue;
@@ -323,7 +323,7 @@ uint32_t BB_ComPacketDataAnalyze(bb_tun_cfg *cfg, uint8_t *u8_RxBuf, int u8_RxLe
                 /* user data all received */
                 if (rx_header->data_buf_index == rx_header->data_length) //2: checksum bytes
                 {
-                    int wrlen = cfg->dev.write(pstBBComRxFIFO->rx_data_buf, rx_header->data_buf_index);
+                    int wrlen = cfg->dev->write(pstBBComRxFIFO->rx_data_buf, rx_header->data_buf_index);
                     if (cfg->debugflg) {
                         com_log(COM_SOCKET_DATA, "tun write = %d", wrlen);
                     }
@@ -376,7 +376,7 @@ static void bb_2_tun_thread(bb_tun_cfg& cfg)
         }
 
         #else
-        int wrlen = cfg.dev.write(pkg_buf, len);
+        int wrlen = cfg.dev->write(pkg_buf, len);
         if (cfg.debugflg) {
             com_log(COM_SOCKET_DATA, "tun write = %d", wrlen);
         }
@@ -416,17 +416,18 @@ static int tun_test(bb_tun_cfg& cfg)
         printf("dev = %s,tun_fd = %d\n", cfg.devname, cfg.tun_fd);
     }
 #else
-    cfg.dev.name(cfg.devname);
+    cfg.dev.reset(new tuntap::tap());
+    cfg.dev->name(cfg.devname);
     if (cfg.ipset_flg) {
-        cfg.dev.ip(cfg.ip, 24);
-        cfg.dev.mtu(cfg.mtu);
+        cfg.dev->ip(cfg.ip, 24);
+        cfg.dev->mtu(cfg.mtu);
         printf("dev = %s,ip = %s,mtu = %d , tun_fd = %" PRIi64 "\n",
                cfg.devname,
                cfg.ip,
-               cfg.dev.mtu(),
-               (uint64_t)cfg.dev.native_handle());
+               cfg.dev->mtu(),
+               (uint64_t)cfg.dev->native_handle());
     }
-    cfg.dev.up();
+    cfg.dev->up();
 #endif
 
     // open bb port
@@ -459,9 +460,6 @@ int main(int argc, char* argv[])
     int         opt           = 0;
     int         flag_help     = 0;
     const char* short_options = "hp:i:u:d:vr:t:";
-    uint32_t    rx_buffer     = 40000;
-    uint32_t    tx_buffer     = 60000;
-
 
     bb_tun_cfg    cfg;
     struct option long_options[] = {
@@ -469,7 +467,7 @@ int main(int argc, char* argv[])
         { "port",  required_argument, NULL, 'p'},
         { "ip",    required_argument, NULL, 'i'},
         { "user",  required_argument, NULL, 'u'},
-        { "dev",   required_argument, NULL, 'e'},
+        { "dev",   required_argument, NULL, 'd'},
         { "debug", no_argument,       NULL, 'v'},
         { "rx_buf",required_argument, NULL, 'r'},
         { "tx_buf",required_argument, NULL, 't'},
@@ -521,6 +519,12 @@ int main(int argc, char* argv[])
 
     if (flag_help) {
         return usage();
+    }
+
+    if (!cfg.ipset_flg) {
+        printf("Error: -i/--ip is required\n");
+        usage();
+        return -1;
     }
 
     return tun_test(cfg);
