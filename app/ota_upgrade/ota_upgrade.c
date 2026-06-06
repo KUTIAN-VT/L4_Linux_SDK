@@ -34,16 +34,19 @@ static int g_err = 0;
 static unsigned int g_written_size = 0;
 static unsigned int g_total_len = 0;
 static bb_dev_list_t* g_devs = NULL;
+static int g_dev_index = 0;
 
 static void usage(const char* name)
 {
     printf("Usage: %s [options]\n", name);
+    printf("\n");
     printf("Options:\n");
-    printf("  -h, --help        Print help info\n");
-    printf("  -i, --ip <ip>     Daemon IP, default 127.0.0.1\n");
-    printf("  -p, --port <port> Daemon port, default BB_PORT_DEFAULT\n");
-    printf("  -f, --file <file> Upgrade image path, default artosyn-upgrade-ar8030.img\n");
-    printf("  -s, --slot <slot> Remote slot index\n");
+    printf("  -h, --help             show this help\n");
+    printf("  -a, --addr <addr>      daemon address, default: 127.0.0.1\n");
+    printf("  -p, --port <port>      daemon port, default: %d\n", BB_PORT_DEFAULT);
+    printf("  -i, --index <index>    device index, default: 0\n");
+    printf("  -f, --file <file>      upgrade image path, required\n");
+    printf("  -s, --slot <slot>      remote slot index\n");
 }
 
 static int create_detach_thread(thread_entry_t entry, void* param, pthread_t* pid)
@@ -275,7 +278,7 @@ static int ar8030_data_transmit(uint32_t addr,
 
         for (i = 0; i < BB_REMOTE_CMD_WAIT_MAX; i++) {
             sem_init(&write_param[i].sem, 0, 0);
-            write_param[i].pdev = bb_dev_open(g_devs[0]);
+            write_param[i].pdev = bb_dev_open(g_devs[g_dev_index]);
             write_param[i].id = i;
             if (!write_param[i].pdev) {
                 printf("bb_dev_open failed for write thread %d\n", i);
@@ -489,8 +492,8 @@ int main(int argc, char** argv)
 {
     int ret = 0;
     int port = BB_PORT_DEFAULT;
-    const char* file_path = "artosyn-upgrade-ar8030.img";
-    const char* ip = "127.0.0.1";
+    const char* file_path = NULL;
+    const char* addr = "127.0.0.1";
     uint32_t partition_addr;
     bb_runsys_t runsys_idx = BB_RUNSYS_MASTER;
     bb_host_t* phost = NULL;
@@ -501,8 +504,9 @@ int main(int argc, char** argv)
 
     static struct option long_options[] = {
         {"help", no_argument, 0, 'h'},
+        {"addr", required_argument, 0, 'a'},
         {"port", required_argument, 0, 'p'},
-        {"ip", required_argument, 0, 'i'},
+        {"index", required_argument, 0, 'i'},
         {"file", required_argument, 0, 'f'},
         {"slot", required_argument, 0, 's'},
         {0, 0, 0, 0},
@@ -510,7 +514,7 @@ int main(int argc, char** argv)
 
     while (1) {
         int option_index = 0;
-        int c = getopt_long(argc, argv, "hi:p:f:s:", long_options, &option_index);
+        int c = getopt_long(argc, argv, "ha:p:i:f:s:", long_options, &option_index);
         if (c == -1) {
             break;
         }
@@ -519,11 +523,14 @@ int main(int argc, char** argv)
         case 'h':
             usage(argv[0]);
             return 0;
-        case 'i':
-            ip = optarg;
+        case 'a':
+            addr = optarg;
             break;
         case 'p':
             port = (int)strtoul(optarg, NULL, 10);
+            break;
+        case 'i':
+            g_dev_index = (int)strtoul(optarg, NULL, 10);
             break;
         case 'f':
             file_path = optarg;
@@ -538,6 +545,14 @@ int main(int argc, char** argv)
     }
 
     printf("%s compiled at: %s %s\n", argv[0], __DATE__, __TIME__);
+
+    if (!file_path) {
+        printf("Error: -f/--file is required\n");
+        usage(argv[0]);
+        ret = -1;
+        goto end;
+    }
+
     printf("upgrade file: %s\n", file_path);
 
     ret = read_file(file_path, &img_data, &file_len);
@@ -554,7 +569,7 @@ int main(int argc, char** argv)
         goto end;
     }
 
-    ret = bb_host_connect(&phost, ip, port);
+    ret = bb_host_connect(&phost, addr, port);
     if (ret) {
         printf("connect failed, ret=%d\n", ret);
         goto end;
@@ -567,7 +582,13 @@ int main(int argc, char** argv)
         goto end;
     }
 
-    pdev = bb_dev_open(g_devs[0]);
+    if (g_dev_index < 0 || g_dev_index >= ret) {
+        printf("invalid device index %d, valid range: 0-%d\n", g_dev_index, ret - 1);
+        ret = -1;
+        goto end;
+    }
+
+    pdev = bb_dev_open(g_devs[g_dev_index]);
     if (!pdev) {
         printf("can't open dev\n");
         ret = -1;

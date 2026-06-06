@@ -244,8 +244,11 @@ static void print_quality(const char *prefix, const bb_quality_t *quality)
 static void usage(const char *prog)
 {
     printf("Usage: %s [options]\n", prog);
-    printf("  -a <addr>       host address, default: 127.0.0.1\n");
-    printf("  -p <port>       host port, default: %d\n", BB_PORT_DEFAULT);
+    printf("\n");
+    printf("Options:\n");
+    printf("  -h              show this help\n");
+    printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
+    printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
     printf("  -s <slot>       slot id, default: 0; DEV uses slot 0 as AP\n");
     printf("  -u <user>       physical user id, default: 0\n");
@@ -258,7 +261,6 @@ static void usage(const char *prog)
     printf("  -C              query BB_GET_CHAN_INFO\n");
     printf("  -B              query BB_GET_BAND_INFO\n");
     printf("  -T              query BB_GET_THROUGHPUT for TX and RX\n");
-    printf("  -h              show this help\n");
 }
 
 static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status)

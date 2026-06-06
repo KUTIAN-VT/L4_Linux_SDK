@@ -14,6 +14,8 @@ typedef struct {
     char ip[128];
     int  port;
     int  spmacflg;
+    int  dev_index;
+    int  dev_index_set;
     char mac[128];
     int  workflg;
 } cmddbg_info;
@@ -71,12 +73,13 @@ void print_help(void)
     printf("Usage: l4_cmd_dbg [options]\n");
     printf("\n");
     printf("Options:\n");
-    printf("  -i, --ip <ip>       daemon IP address, default 127.0.0.1\n");
-    printf("  -p, --port <port>   daemon port, default %d\n", BB_PORT_DEFAULT);
-    printf("  -m, --mac <mac>     select device by MAC address\n");
-    printf("  -l, --list          list devices and exit\n");
-    printf("  -o, --output        output only, do not read commands from stdin\n");
-    printf("  -h, --help          show this help\n");
+    printf("  -h, --help            show this help\n");
+    printf("  -a, --addr <addr>    daemon address, default: 127.0.0.1\n");
+    printf("  -p, --port <port>    daemon port, default: %d\n", BB_PORT_DEFAULT);
+    printf("  -i, --index <index>  device index, default: 0\n");
+    printf("  -m, --mac <mac>      select device by MAC address\n");
+    printf("  -l, --list            list devices and exit\n");
+    printf("  -o, --output          output only, do not read commands from stdin\n");
 }
 
 int main(int argc, char* argv[])
@@ -85,6 +88,8 @@ int main(int argc, char* argv[])
     info.workflg  = 1;
     info.port     = BB_PORT_DEFAULT;
     info.spmacflg = 0;
+    info.dev_index = 0;
+    info.dev_index_set = 0;
     copy_string(info.ip, sizeof(info.ip), "127.0.0.1");
     info.mac[0] = '\0';
 
@@ -96,25 +101,30 @@ int main(int argc, char* argv[])
         int                  option_index   = 0;
         static struct option long_options[] = {
             {"help",    no_argument,       0, 'h'},
-            { "ip",     required_argument, 0, 'i'},
+            { "addr",   required_argument, 0, 'a'},
             { "port",   required_argument, 0, 'p'},
+            { "index",  required_argument, 0, 'i'},
             { "mac",    required_argument, 0, 'm'},
             { "list",   no_argument,       0, 'l'},
             { "output", no_argument,       0, 'o'},
             { 0,        0,                 0, 0  },
         };
 
-        c = getopt_long(argc, argv, "i:p:m:hlo", long_options, &option_index);
+        c = getopt_long(argc, argv, "a:p:i:m:hlo", long_options, &option_index);
         if (c == -1) {
             break;
         }
 
         switch (c) {
+        case 'a':
+            copy_string(info.ip, sizeof(info.ip), optarg);
+            break;
         case 'p':
             info.port = (int)strtoul(optarg, NULL, 10);
             break;
         case 'i':
-            copy_string(info.ip, sizeof(info.ip), optarg);
+            info.dev_index = (int)strtoul(optarg, NULL, 10);
+            info.dev_index_set = 1;
             break;
         case 'm':
             info.spmacflg = 1;
@@ -134,6 +144,11 @@ int main(int argc, char* argv[])
             print_help();
             return -1;
         }
+    }
+
+    if (info.spmacflg && info.dev_index_set) {
+        printf("-i/--index and -m/--mac cannot be used together\n");
+        return -1;
     }
 
     bb_host_t* phost;
@@ -183,7 +198,13 @@ int main(int argc, char* argv[])
             return -1;
         }
     } else {
-        hbb = bb_dev_open(devs[0]);
+        if (info.dev_index < 0 || info.dev_index >= sz) {
+            printf("invalid device index %d, valid range: 0-%d\n", info.dev_index, sz - 1);
+            bb_dev_freelist(devs);
+            bb_host_disconnect(phost);
+            return -1;
+        }
+        hbb = bb_dev_open(devs[info.dev_index]);
     }
 
     if (!hbb) {

@@ -13,6 +13,9 @@ struct bb_tun_cfg {
     bb_dev_handle_t* pdev    = nullptr;
     bb_slot_e        slot_id = BB_SLOT_0;
     int              port_id = 3;
+    int              dev_index = 0;
+    int              daemon_port = BB_PORT_DEFAULT;
+    char             addr[128] = { 0 };
     // tun field
     int  ipset_flg    = 0;
     int  mtu          = 4000;
@@ -29,6 +32,7 @@ struct bb_tun_cfg {
 
     bb_tun_cfg()
     {
+        strcpy(addr, "127.0.0.1");
         strcpy(devname, "tap0");
         ip[0] = '\0';
         strcpy(mask, "255.255.255.0");

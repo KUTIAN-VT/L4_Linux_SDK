@@ -10,8 +10,11 @@
 static void usage(const char *prog)
 {
     printf("Usage: %s [options]\n", prog);
-    printf("  -a <addr>       host address, default: 127.0.0.1\n");
-    printf("  -p <port>       host port, default: %d\n", BB_PORT_DEFAULT);
+    printf("\n");
+    printf("Options:\n");
+    printf("  -h              show this help\n");
+    printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
+    printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
     printf("  -s <slot>       slot id for bandwidth/MCS, default: 0\n");
     printf("  -B <0|1>        set BB_SET_BAND_MODE, 1=auto, 0=manual\n");
@@ -24,7 +27,6 @@ static void usage(const char *prog)
     printf("  -M <0|1>        set BB_SET_MCS_MODE, 1=auto, 0=manual\n");
     printf("  -m <mcs>        set BB_SET_MCS, range: 0-%d\n", BB_PHY_MCS_MAX - 1);
     printf("  -F <0|1>        set BB_SET_FRAME_CHANGE, only valid in SINGLE_USER mode\n");
-    printf("  -h              show this help\n");
 }
 
 static int str_eq_ignore_case(const char *a, const char *b)

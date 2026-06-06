@@ -80,8 +80,11 @@ static const char *role_name(uint8_t role)
 static void usage(const char *prog)
 {
     printf("Usage: %s [options]\n", prog);
-    printf("  -a <addr>     host address, default: 127.0.0.1\n");
-    printf("  -p <port>     host port, default: %d\n", BB_PORT_DEFAULT);
+    printf("\n");
+    printf("Options:\n");
+    printf("  -h            show this help\n");
+    printf("  -a <addr>     daemon address, default: 127.0.0.1\n");
+    printf("  -p <port>     daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>    device index, default: 0\n");
     printf("  -s <slot>     pair slot, default: 0\n");
     printf("  -t <sec>      pair timeout, default: %d\n", DEFAULT_PAIR_TIMEOUT_SEC);
@@ -90,7 +93,6 @@ static void usage(const char *prog)
     printf("  -X            stop pair\n");
     printf("  -m            get paired peer mac by role\n");
     printf("  -M <mac>      set paired peer mac by role, format: 11:22:33:44\n");
-    printf("  -h            show this help\n");
 }
 
 static void pair_signal_handler(int signo)

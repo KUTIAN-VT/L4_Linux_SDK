@@ -14,16 +14,20 @@
 // print usage
 int usage(void)
 {
-    printf("This is a test program to demo baseband transport function!\n");
-    printf("Option List:\n");
-    printf(" -h --help              print usage which you're seeing\n");
-    printf(" -u --user              specify the baseband user id, default 0\n");
-    printf(" -p --port              specify the transport id, default 3\n");
-    printf(" -i --ip                specify the tap device ip, required\n");
-    printf(" -d --dev               specify the tap device name, default tap0\n");
-    printf(" -v --debug             debug mode in ethernet transfer\n");
-    printf(" -r --rx_buf            buffer len of rx, default 40000\n");
-    printf(" -t --tx_buf            buffer len of tx, default 60000\n");
+    printf("Usage: l4_tuntap [options]\n");
+    printf("\n");
+    printf("Options:\n");
+    printf("  -h, --help             show this help\n");
+    printf("  -a, --addr <addr>      daemon address, default: 127.0.0.1\n");
+    printf("  -p, --port <port>      daemon port, default: %d\n", BB_PORT_DEFAULT);
+    printf("  -i, --index <index>    device index, default: 0\n");
+    printf("  -P, --transport <id>   transport id, default: 3\n");
+    printf("  -I, --tap-ip <ip>      TAP device IP, required\n");
+    printf("  -u, --user <user>      baseband user id, default: 0\n");
+    printf("  -d, --dev <name>       TAP device name, default: tap0\n");
+    printf("  -v, --debug            debug mode in ethernet transfer\n");
+    printf("  -r, --rx-buf <bytes>   rx buffer length, default: 40000\n");
+    printf("  -t, --tx-buf <bytes>   tx buffer length, default: 60000\n");
 
     return 0;
 }
@@ -386,7 +390,7 @@ static void bb_2_tun_thread(bb_tun_cfg& cfg)
 
 static int tun_test(bb_tun_cfg& cfg)
 {
-    int ret = bb_host_connect(&cfg.phost, "127.0.0.1", BB_PORT_DEFAULT);
+    int ret = bb_host_connect(&cfg.phost, cfg.addr, cfg.daemon_port);
     if (ret) {
         printf("connect failed = %d\n", ret);
         return ret;
@@ -401,7 +405,12 @@ static int tun_test(bb_tun_cfg& cfg)
         return sz;
     }
 
-    cfg.pdev = bb_dev_open(devs[0]);
+    if (cfg.dev_index < 0 || cfg.dev_index >= sz) {
+        printf("invalid device index %d, valid range: 0-%d\n", cfg.dev_index, sz - 1);
+        return -1;
+    }
+
+    cfg.pdev = bb_dev_open(devs[cfg.dev_index]);
     if (!cfg.pdev) {
         printf("can't open dev!!!\n");
         return -1;
@@ -459,18 +468,21 @@ int main(int argc, char* argv[])
 {
     int         opt           = 0;
     int         flag_help     = 0;
-    const char* short_options = "hp:i:u:d:vr:t:";
+    const char* short_options = "ha:p:i:P:I:u:d:vr:t:";
 
     bb_tun_cfg    cfg;
     struct option long_options[] = {
-        {"help",   no_argument,       NULL, 'h'},
-        { "port",  required_argument, NULL, 'p'},
-        { "ip",    required_argument, NULL, 'i'},
-        { "user",  required_argument, NULL, 'u'},
+        {"help",      no_argument,       NULL, 'h'},
+        { "addr",      required_argument, NULL, 'a'},
+        { "port",      required_argument, NULL, 'p'},
+        { "index",     required_argument, NULL, 'i'},
+        { "transport", required_argument, NULL, 'P'},
+        { "tap-ip",    required_argument, NULL, 'I'},
+        { "user",      required_argument, NULL, 'u'},
         { "dev",   required_argument, NULL, 'd'},
         { "debug", no_argument,       NULL, 'v'},
-        { "rx_buf",required_argument, NULL, 'r'},
-        { "tx_buf",required_argument, NULL, 't'},
+        { "rx-buf",    required_argument, NULL, 'r'},
+        { "tx-buf",    required_argument, NULL, 't'},
         { 0,       0,                 0,    0  },
     };
 
@@ -479,10 +491,19 @@ int main(int argc, char* argv[])
         case 'h':
             flag_help = 1;
             break;
+        case 'a':
+            strcpy(cfg.addr, optarg);
+            break;
         case 'p':
-            cfg.port_id = strtoul(optarg, NULL, 10);
+            cfg.daemon_port = strtoul(optarg, NULL, 10);
             break;
         case 'i':
+            cfg.dev_index = strtoul(optarg, NULL, 10);
+            break;
+        case 'P':
+            cfg.port_id = strtoul(optarg, NULL, 10);
+            break;
+        case 'I':
             strcpy(cfg.ip, optarg);
             cfg.ipset_flg = 1;
             break;
@@ -522,7 +543,7 @@ int main(int argc, char* argv[])
     }
 
     if (!cfg.ipset_flg) {
-        printf("Error: -i/--ip is required\n");
+        printf("Error: -I/--tap-ip is required\n");
         usage();
         return -1;
     }

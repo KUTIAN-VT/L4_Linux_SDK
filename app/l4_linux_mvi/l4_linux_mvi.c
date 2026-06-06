@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -9,8 +10,14 @@
 
 static void usage(const char *prog)
 {
-    printf("Usage: %s -v\n", prog);
-    printf("\t-v       get version\n");
+    printf("Usage: %s [options]\n", prog);
+    printf("\n");
+    printf("Options:\n");
+    printf("  -h, --help             show this help\n");
+    printf("  -a, --addr <addr>      daemon address, default: 127.0.0.1\n");
+    printf("  -p, --port <port>      daemon port, default: %d\n", BB_PORT_DEFAULT);
+    printf("  -i, --index <index>    device index, default: 0\n");
+    printf("  -v, --version          get version\n");
 }
 
 static int get_version(bb_dev_handle_t *handle)
@@ -37,6 +44,9 @@ static int get_version(bb_dev_handle_t *handle)
 int main(int argc, char **argv)
 {
     bool is_get_version = false;
+    const char *addr = "127.0.0.1";
+    int port = BB_PORT_DEFAULT;
+    int dev_index = 0;
     bb_host_t *host = NULL;
     bb_dev_list_t *devs = NULL;
     bb_dev_handle_t *handle = NULL;
@@ -49,11 +59,29 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    while ((opt = getopt(argc, argv, "hv")) != -1) {
+    static struct option long_options[] = {
+        {"help", no_argument, 0, 'h'},
+        {"addr", required_argument, 0, 'a'},
+        {"port", required_argument, 0, 'p'},
+        {"index", required_argument, 0, 'i'},
+        {"version", no_argument, 0, 'v'},
+        {0, 0, 0, 0},
+    };
+
+    while ((opt = getopt_long(argc, argv, "ha:p:i:v", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
             return 0;
+        case 'a':
+            addr = optarg;
+            break;
+        case 'p':
+            port = (int)strtoul(optarg, NULL, 10);
+            break;
+        case 'i':
+            dev_index = (int)strtoul(optarg, NULL, 10);
+            break;
         case 'v':
             is_get_version = true;
             printf("get version\n");
@@ -70,7 +98,7 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    ret = bb_host_connect(&host, "127.0.0.1", BB_PORT_DEFAULT);
+    ret = bb_host_connect(&host, addr, port);
     if (ret) {
         printf("bb connect error, ret = %d\n", ret);
         return -1;
@@ -83,7 +111,13 @@ int main(int argc, char **argv)
         goto done;
     }
 
-    handle = bb_dev_open(devs[0]);
+    if (dev_index < 0 || dev_index >= dev_num) {
+        printf("invalid device index %d, valid range: 0-%d\n", dev_index, dev_num - 1);
+        ret = -1;
+        goto done;
+    }
+
+    handle = bb_dev_open(devs[dev_index]);
     if (!handle) {
         printf("bb_dev_open error\n");
         ret = -1;

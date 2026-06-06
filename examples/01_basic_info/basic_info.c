@@ -162,13 +162,15 @@ static void print_mac(const bb_mac_t *mac)
 static void usage(const char *prog)
 {
     printf("Usage: %s [options]\n", prog);
-    printf("  -a <addr>       host address, default: 127.0.0.1\n");
-    printf("  -p <port>       host port, default: %d\n", BB_PORT_DEFAULT);
+    printf("\n");
+    printf("Options:\n");
+    printf("  -h              show this help\n");
+    printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
+    printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
     printf("  -S              query BB_GET_STATUS\n");
     printf("  -V              query BB_GET_SYS_INFO\n");
     printf("  -A              query all basic information, default action\n");
-    printf("  -h              show this help\n");
 }
 
 static int query_sys_info(bb_dev_handle_t *handle)
