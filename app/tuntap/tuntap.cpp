@@ -32,6 +32,18 @@ int usage(void)
     return 0;
 }
 
+static void print_tuntap_cfg(const bb_tun_cfg& cfg)
+{
+    printf("l4_tuntap args: -u %d -P %d -I %s -d %s -r %u -t %u\n",
+           (int)cfg.slot_id,
+           cfg.port_id,
+           cfg.ip,
+           cfg.devname,
+           (unsigned int)cfg.rx_buf_len,
+           (unsigned int)cfg.tx_buf_len);
+    fflush(stdout);
+}
+
 #define BBCOM_SESSION_DATA_HEADER_SIZE      15
 #define BBCOM_RX_BUF_SIZE                   (4000)
 #define BBCOM_TX_FIFO_SIZE                  (4000)
@@ -519,11 +531,9 @@ int main(int argc, char* argv[])
             break;
         case 'r':
             cfg.rx_buf_len = strtoul(optarg, NULL, 10);
-            printf("set   cfg.rx_buf_len  %d \n",  cfg.rx_buf_len );
             break;
         case 't':
             cfg.tx_buf_len = strtoul(optarg, NULL, 10);
-            printf("set   cfg.tx_buf_len  %d \n",  cfg.tx_buf_len );
             break;
         default:
             printf("unknown option\n");
@@ -547,6 +557,8 @@ int main(int argc, char* argv[])
         usage();
         return -1;
     }
+
+    print_tuntap_cfg(cfg);
 
     return tun_test(cfg);
 }
