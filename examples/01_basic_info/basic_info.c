@@ -47,6 +47,26 @@ static const char *link_state_name(uint8_t state)
     }
 }
 
+static const char *bandwidth_name(uint8_t bandwidth)
+{
+    switch (bandwidth) {
+    case BB_BW_1_25M:
+        return "1.25MHz";
+    case BB_BW_2_5M:
+        return "2.5MHz";
+    case BB_BW_5M:
+        return "5MHz";
+    case BB_BW_10M:
+        return "10MHz";
+    case BB_BW_20M:
+        return "20MHz";
+    case BB_BW_40M:
+        return "40MHz";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 static const char *tintlv_mode_name(uint8_t tintlv_len, uint8_t tintlv_num)
 {
     if (tintlv_len == 3 && tintlv_num == 1) {
@@ -102,45 +122,43 @@ static int get_user_phy_view(const bb_get_status_out_t *status, int tx, user_phy
 static void print_user_phy_view(const char *dir, const user_phy_view_t *view, int tx)
 {
     const bb_phy_status_t *phy = view->phy;
-    const char *mode = tintlv_mode_name(phy->tintlv_len, phy->tintlv_num);
-    const char *major_dir = tintlv_major_dir(phy->tintlv_len, phy->tintlv_num);
 
     if (tx) {
-        printf("  %s: user=%d source=%s freq=%uKHz mcs_raw=%u mcs_real=%d bw=%u "
-               "tintlv_enable=%u tintlv_len=%u tintlv_num=%u bw_mode=%s major_dir=%s\n",
+        printf("  %s: user=%d source=%s freq=%uKHz mcs_raw=%u mcs_real=%d bw=%s(%u) "
+               "tintlv_enable=%u tintlv_len=%u tintlv_num=%u\n",
                dir,
                view->user,
                view->source,
                phy->freq_khz,
                phy->mcs,
                (int)phy->mcs - 2,
+               bandwidth_name(phy->bandwidth),
                phy->bandwidth,
                phy->tintlv_enable,
                phy->tintlv_len,
-               phy->tintlv_num,
-               mode,
-               major_dir);
+               phy->tintlv_num);
         return;
     }
 
-    printf("  %s: user=%d source=%s freq=%uKHz bw=%u tintlv_enable=%u tintlv_len=%u "
-           "tintlv_num=%u bw_mode=%s major_dir=%s\n",
+    printf("  %s: user=%d source=%s freq=%uKHz bw=%s(%u) tintlv_enable=%u tintlv_len=%u "
+           "tintlv_num=%u\n",
            dir,
            view->user,
            view->source,
            phy->freq_khz,
+           bandwidth_name(phy->bandwidth),
            phy->bandwidth,
            phy->tintlv_enable,
            phy->tintlv_len,
-           phy->tintlv_num,
-           mode,
-           major_dir);
+           phy->tintlv_num);
 }
 
 static void print_user_phy_status(const bb_get_status_out_t *status)
 {
     user_phy_view_t rx_view;
     user_phy_view_t tx_view;
+    const char *mode;
+    const char *major_dir;
 
     printf("\nuser phy status:\n");
     if (get_user_phy_view(status, 0, &rx_view) || get_user_phy_view(status, 1, &tx_view)) {
@@ -148,8 +166,12 @@ static void print_user_phy_status(const bb_get_status_out_t *status)
         return;
     }
 
+    mode = tintlv_mode_name(rx_view.phy->tintlv_len, rx_view.phy->tintlv_num);
+    major_dir = tintlv_major_dir(rx_view.phy->tintlv_len, rx_view.phy->tintlv_num);
+
     print_user_phy_view("RX", &rx_view, 0);
     print_user_phy_view("TX", &tx_view, 1);
+    printf("  bw_mode=%s major_dir=%s\n", mode, major_dir);
 }
 
 static void print_mac(const bb_mac_t *mac)
@@ -222,9 +244,11 @@ static int query_status(bb_dev_handle_t *handle)
     printf("\n");
 
     printf("\nslot link status:\n");
-    for (int i = 0; i < BB_SLOT_MAX; ++i) {
+    for (int i = 0; i < (status.mode == BB_MODE_SINGLE_USER ? 1 : BB_SLOT_MAX); ++i) {
         const bb_link_status_t *link = &status.link_status[i];
-        if (link->state == BB_LINK_STATE_IDLE && link->rx_mcs == 0 && link->pair_state == 0) {
+        if (link->state != BB_LINK_STATE_IDLE &&
+            link->state != BB_LINK_STATE_LOCK &&
+            link->state != BB_LINK_STATE_CONNECT) {
             continue;
         }
 

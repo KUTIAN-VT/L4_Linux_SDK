@@ -232,7 +232,7 @@ slot link status:
 | `CONNECT` | 已连接 |
 | `UNKNOWN` | 示例代码暂时没有识别出的状态值 |
 
-程序会跳过完全空闲且没有有效信息的 slot，所以没打印某个 slot 通常表示它当前没有有效链路状态。
+程序会按当前工作模式打印 slot：`SINGLE_USER` 只打印 slot 0，其它模式遍历全部 slot；状态值不是 `IDLE`、`LOCK` 或 `CONNECT` 的 slot 会被跳过。
 `rx_mcs_raw` 是 SDK 原始值，真实 MCS 按 `rx_mcs_raw - 2` 输出为 `rx_mcs_real`。
 
 ### user phy status
@@ -241,11 +241,12 @@ slot link status:
 
 ```text
 user phy status:
-  RX: user=0 source=rx freq=1400000KHz bw=20 tintlv_enable=1 tintlv_len=3 tintlv_num=1 bw_mode=Y24X2 major_dir=DEV->AP
-  TX: user=8 source=tx freq=1400000KHz mcs_raw=4 mcs_real=2 bw=20 tintlv_enable=1 tintlv_len=3 tintlv_num=1 bw_mode=Y24X2 major_dir=DEV->AP
+  RX: user=0 source=rx freq=1400000KHz bw=20MHz(4) tintlv_enable=1 tintlv_len=3 tintlv_num=1
+  TX: user=8 source=tx freq=1400000KHz mcs_raw=4 mcs_real=2 bw=20MHz(4) tintlv_enable=1 tintlv_len=3 tintlv_num=1
+  bw_mode=Y24X2 major_dir=DEV->AP
 ```
 
-查看 TX 状态时只参考 `tx` 对象，并输出 `mcs_raw` 和修正后的 `mcs_real=mcs_raw-2`。查看 RX 状态时只参考 `rx` 对象，RX 端物理 MCS 字段不作为有效 MCS 输出。
+查看 TX 状态时只参考 `tx` 对象，并输出 `mcs_raw` 和修正后的 `mcs_real=mcs_raw-2`。查看 RX 状态时只参考 `rx` 对象，RX 端物理 MCS 字段不作为有效 MCS 输出。`bw_mode` 和 `major_dir` 只根据 RX 行的 `tintlv_len/tintlv_num` 解释，并单独一行输出。
 
 ## 6. 新手最容易混淆的点
 
