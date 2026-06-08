@@ -96,6 +96,20 @@
 
 如果没有指定任何设置动作，程序只打印帮助并返回错误，避免误操作。
 
+## 输出日志格式
+
+每个成功执行的命令会先打印命令字标题，再打印参数详情，格式和 `03_link_monitor` 保持一致：
+
+```text
+[BB_SET_BAND_MODE]
+auto_mode=0
+
+[BB_SET_BAND]
+target_band=5G(2)
+```
+
+任意一步 `bb_ioctl()` 返回非 0 时，程序会打印 `BB_SET_xxx failed, ret=<ret>`，停止后续设置，关闭连接并返回错误。
+
 ## 参数和结构体字段的对应关系
 
 ### `BB_SET_BAND_MODE`

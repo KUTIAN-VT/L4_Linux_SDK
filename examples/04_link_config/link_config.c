@@ -189,8 +189,14 @@ static int set_band_mode(bb_dev_handle_t *handle, int auto_mode)
     input.auto_mode = (uint8_t)auto_mode;
 
     ret = bb_ioctl(handle, BB_SET_BAND_MODE, &input, NULL);
-    printf("BB_SET_BAND_MODE auto_mode=%u ret=%d\n", input.auto_mode, ret);
-    return ret;
+    if (ret) {
+        printf("BB_SET_BAND_MODE failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_BAND_MODE]\n");
+    printf("auto_mode=%u\n", input.auto_mode);
+    return 0;
 }
 
 static int set_band(bb_dev_handle_t *handle, int target_band)
@@ -202,11 +208,14 @@ static int set_band(bb_dev_handle_t *handle, int target_band)
     input.target_band = (uint8_t)target_band;
 
     ret = bb_ioctl(handle, BB_SET_BAND, &input, NULL);
-    printf("BB_SET_BAND target_band=%s(%u) ret=%d\n",
-           band_name(input.target_band),
-           input.target_band,
-           ret);
-    return ret;
+    if (ret) {
+        printf("BB_SET_BAND failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_BAND]\n");
+    printf("target_band=%s(%u)\n", band_name(input.target_band), input.target_band);
+    return 0;
 }
 
 static int set_chan_mode(bb_dev_handle_t *handle, int auto_mode)
@@ -218,8 +227,14 @@ static int set_chan_mode(bb_dev_handle_t *handle, int auto_mode)
     input.auto_mode = (uint8_t)auto_mode;
 
     ret = bb_ioctl(handle, BB_SET_CHAN_MODE, &input, NULL);
-    printf("BB_SET_CHAN_MODE auto_mode=%u ret=%d\n", input.auto_mode, ret);
-    return ret;
+    if (ret) {
+        printf("BB_SET_CHAN_MODE failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_CHAN_MODE]\n");
+    printf("auto_mode=%u\n", input.auto_mode);
+    return 0;
 }
 
 static int set_chan(bb_dev_handle_t *handle, int chan_dir, int chan_index)
@@ -232,12 +247,17 @@ static int set_chan(bb_dev_handle_t *handle, int chan_dir, int chan_index)
     input.chan_index = (uint8_t)chan_index;
 
     ret = bb_ioctl(handle, BB_SET_CHAN, &input, NULL);
-    printf("BB_SET_CHAN dir=%s(%u) chan_index=%u ret=%d\n",
+    if (ret) {
+        printf("BB_SET_CHAN failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_CHAN]\n");
+    printf("dir=%s(%u) chan_index=%u\n",
            dir_name(input.chan_dir),
            input.chan_dir,
-           input.chan_index,
-           ret);
-    return ret;
+           input.chan_index);
+    return 0;
 }
 
 static int set_bandwidth_mode(bb_dev_handle_t *handle, int slot, int mode)
@@ -250,8 +270,14 @@ static int set_bandwidth_mode(bb_dev_handle_t *handle, int slot, int mode)
     input.mode = (uint8_t)mode;
 
     ret = bb_ioctl(handle, BB_SET_BANDWIDTH_MODE, &input, NULL);
-    printf("BB_SET_BANDWIDTH_MODE slot=%u mode=%u ret=%d\n", input.slot, input.mode, ret);
-    return ret;
+    if (ret) {
+        printf("BB_SET_BANDWIDTH_MODE failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_BANDWIDTH_MODE]\n");
+    printf("slot=%u mode=%u\n", input.slot, input.mode);
+    return 0;
 }
 
 static int set_bandwidth(bb_dev_handle_t *handle, int slot, int dir, int bandwidth)
@@ -265,14 +291,19 @@ static int set_bandwidth(bb_dev_handle_t *handle, int slot, int dir, int bandwid
     input.bandwidth = (uint8_t)bandwidth;
 
     ret = bb_ioctl(handle, BB_SET_BANDWIDTH, &input, NULL);
-    printf("BB_SET_BANDWIDTH slot=%u dir=%s(%u) bandwidth=%s(%u) ret=%d\n",
+    if (ret) {
+        printf("BB_SET_BANDWIDTH failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_BANDWIDTH]\n");
+    printf("slot=%u dir=%s(%u) bandwidth=%s(%u)\n",
            input.slot,
            dir_name(input.dir),
            input.dir,
            bandwidth_name(input.bandwidth),
-           input.bandwidth,
-           ret);
-    return ret;
+           input.bandwidth);
+    return 0;
 }
 
 static int set_mcs_mode(bb_dev_handle_t *handle, int slot, int auto_mode)
@@ -285,11 +316,16 @@ static int set_mcs_mode(bb_dev_handle_t *handle, int slot, int auto_mode)
     input.auto_mode = (uint8_t)auto_mode;
 
     ret = bb_ioctl(handle, BB_SET_MCS_MODE, &input, NULL);
-    printf("BB_SET_MCS_MODE slot=%u auto_mode=%u ret=%d\n",
+    if (ret) {
+        printf("BB_SET_MCS_MODE failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_MCS_MODE]\n");
+    printf("slot=%u auto_mode=%u\n",
            input.slot,
-           input.auto_mode,
-           ret);
-    return ret;
+           input.auto_mode);
+    return 0;
 }
 
 static int set_mcs(bb_dev_handle_t *handle, int slot, int mcs)
@@ -302,8 +338,14 @@ static int set_mcs(bb_dev_handle_t *handle, int slot, int mcs)
     input.mcs = (uint8_t)mcs;
 
     ret = bb_ioctl(handle, BB_SET_MCS, &input, NULL);
-    printf("BB_SET_MCS slot=%u mcs=%u ret=%d\n", input.slot, input.mcs, ret);
-    return ret;
+    if (ret) {
+        printf("BB_SET_MCS failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_MCS]\n");
+    printf("slot=%u mcs=%u\n", input.slot, input.mcs);
+    return 0;
 }
 
 static int set_frame_change(bb_dev_handle_t *handle, int mode)
@@ -318,7 +360,8 @@ static int set_frame_change(bb_dev_handle_t *handle, int mode)
     }
 
     if (status.mode != BB_MODE_SINGLE_USER) {
-        printf("BB_SET_FRAME_CHANGE requires SINGLE_USER mode, current mode=%s(%u)\n",
+        printf("\n[BB_SET_FRAME_CHANGE]\n");
+        printf("requires SINGLE_USER mode, current mode=%s(%u)\n",
                mode_name(status.mode),
                status.mode);
         return -1;
@@ -328,8 +371,14 @@ static int set_frame_change(bb_dev_handle_t *handle, int mode)
     input.mode = (uint8_t)mode;
 
     ret = bb_ioctl(handle, BB_SET_FRAME_CHANGE, &input, NULL);
-    printf("BB_SET_FRAME_CHANGE mode=%u ret=%d\n", input.mode, ret);
-    return ret;
+    if (ret) {
+        printf("BB_SET_FRAME_CHANGE failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_SET_FRAME_CHANGE]\n");
+    printf("mode=%u\n", input.mode);
+    return 0;
 }
 
 int main(int argc, char **argv)
