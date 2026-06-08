@@ -88,7 +88,6 @@ static void usage(const char *prog)
     printf("  -i <index>    device index, default: 0\n");
     printf("  -s <slot>     pair slot, default: 0\n");
     printf("  -t <sec>      pair timeout, default: %d\n", DEFAULT_PAIR_TIMEOUT_SEC);
-    printf("  -w <sec>      wait callback seconds, default: timeout + 5\n");
     printf("  -P            start pair and wait BB_EVENT_PAIR_RESULT\n");
     printf("  -X            stop pair\n");
     printf("  -m            get paired peer mac by role\n");
@@ -333,7 +332,7 @@ static int get_pair_result(bb_dev_handle_t *handle, int slot)
     return -1;
 }
 
-static int start_pair(bb_dev_handle_t *handle, int slot, int timeout_sec, int wait_sec)
+static int start_pair(bb_dev_handle_t *handle, int slot, int timeout_sec)
 {
     bb_set_prj_dispatch_in_t request;
     prj_rpc_hdr_t *hdr;
@@ -385,25 +384,15 @@ static int start_pair(bb_dev_handle_t *handle, int slot, int timeout_sec, int wa
 
     signal(SIGINT, pair_signal_handler);
 
-    for (int elapsed = 0; elapsed < wait_sec; ++elapsed) {
-        if (g_pair_done) {
-            break;
-        }
-
+    while (!g_pair_done) {
         if (g_stop_requested) {
             printf("interrupt received, stopping pair\n");
             send_pair_stop(handle);
             break;
         }
 
-        printf("waiting for pair result... %d/%d\n", elapsed + 1, wait_sec);
+        printf("waiting for pair result...\n");
         sleep(1);
-    }
-
-    if (!g_pair_done && !g_stop_requested) {
-        printf("wait timeout, stopping pair\n");
-        send_pair_stop(handle);
-        return -1;
     }
 
     if (g_pair_done && g_pair_ret == 0) {
@@ -420,7 +409,6 @@ int main(int argc, char **argv)
     int dev_index = 0;
     int slot = 0;
     int timeout_sec = DEFAULT_PAIR_TIMEOUT_SEC;
-    int wait_sec = -1;
     int do_start = 0;
     int do_stop = 0;
     int do_get_pair = 0;
@@ -432,7 +420,7 @@ int main(int argc, char **argv)
 
     memset(&set_mac, 0, sizeof(set_mac));
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:t:w:M:PXm")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:t:M:PXm")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -451,9 +439,6 @@ int main(int argc, char **argv)
             break;
         case 't':
             timeout_sec = (int)strtol(optarg, NULL, 10);
-            break;
-        case 'w':
-            wait_sec = (int)strtol(optarg, NULL, 10);
             break;
         case 'P':
             do_start = 1;
@@ -492,10 +477,6 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    if (wait_sec < 0) {
-        wait_sec = timeout_sec + 5;
-    }
-
     ret = bb_demo_open(&ctx, addr, port, dev_index);
     if (ret) {
         return -1;
@@ -516,7 +497,7 @@ int main(int argc, char **argv)
     }
 
     if (do_start) {
-        ret = start_pair(ctx.handle, slot, timeout_sec, wait_sec);
+        ret = start_pair(ctx.handle, slot, timeout_sec);
         if (ret) {
             goto done;
         }
