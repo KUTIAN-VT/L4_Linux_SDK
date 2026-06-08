@@ -161,12 +161,10 @@ static int get_user_phy_view(const bb_get_status_out_t *status, int tx, user_phy
 static void print_user_phy_view(const char *dir, const user_phy_view_t *view, int tx)
 {
     const bb_phy_status_t *phy = view->phy;
-    const char *mode = tintlv_mode_name(phy->tintlv_len, phy->tintlv_num);
-    const char *major_dir = tintlv_major_dir(phy->tintlv_len, phy->tintlv_num);
 
     if (tx) {
         printf("  %s: user=%d source=%s freq=%uKHz mcs_raw=%u mcs_real=%d bw=%s(%u) "
-               "tintlv_enable=%u tintlv_len=%u tintlv_num=%u bw_mode=%s major_dir=%s\n",
+               "tintlv_enable=%u tintlv_len=%u tintlv_num=%u\n",
                dir,
                view->user,
                view->source,
@@ -177,14 +175,12 @@ static void print_user_phy_view(const char *dir, const user_phy_view_t *view, in
                phy->bandwidth,
                phy->tintlv_enable,
                phy->tintlv_len,
-               phy->tintlv_num,
-               mode,
-               major_dir);
+               phy->tintlv_num);
         return;
     }
 
     printf("  %s: user=%d source=%s freq=%uKHz bw=%s(%u) tintlv_enable=%u tintlv_len=%u "
-           "tintlv_num=%u bw_mode=%s major_dir=%s\n",
+           "tintlv_num=%u\n",
            dir,
            view->user,
            view->source,
@@ -193,15 +189,15 @@ static void print_user_phy_view(const char *dir, const user_phy_view_t *view, in
            phy->bandwidth,
            phy->tintlv_enable,
            phy->tintlv_len,
-           phy->tintlv_num,
-           mode,
-           major_dir);
+           phy->tintlv_num);
 }
 
 static void print_user_phy_status(const bb_get_status_out_t *status)
 {
     user_phy_view_t rx_view;
     user_phy_view_t tx_view;
+    const char *mode;
+    const char *major_dir;
 
     printf("\nuser phy status:\n");
     if (get_user_phy_view(status, 0, &rx_view) || get_user_phy_view(status, 1, &tx_view)) {
@@ -209,8 +205,12 @@ static void print_user_phy_status(const bb_get_status_out_t *status)
         return;
     }
 
+    mode = tintlv_mode_name(rx_view.phy->tintlv_len, rx_view.phy->tintlv_num);
+    major_dir = tintlv_major_dir(rx_view.phy->tintlv_len, rx_view.phy->tintlv_num);
+
     print_user_phy_view("RX", &rx_view, 0);
     print_user_phy_view("TX", &tx_view, 1);
+    printf("  bw_mode=%s major_dir=%s\n", mode, major_dir);
 }
 
 static void print_mac(const bb_mac_t *mac)
@@ -241,6 +241,24 @@ static void print_quality(const char *prefix, const bb_quality_t *quality)
            quality->gain_b);
 }
 
+static void print_1v1_info(const char *name, const bb_info_t *info)
+{
+    printf("  %s: snr_raw=%u snr_db=%.2f dB ldpc_tlv_err_ratio=%u "
+           "ldpc_num_err_ratio=%u gain_a=%u gain_b=%u tx_mcs=%u tx_chan=%u "
+           "tx_power=%u tx_freq_khz=%u\n",
+           name,
+           info->snr,
+           snr_to_db(info->snr),
+           info->ldpc_tlv_err_ratio,
+           info->ldpc_num_err_ratio,
+           info->gain_a,
+           info->gain_b,
+           info->tx_mcs,
+           info->tx_chan,
+           info->tx_power,
+           info->tx_freq_khz);
+}
+
 static void usage(const char *prog)
 {
     printf("Usage: %s [options]\n", prog);
@@ -261,6 +279,7 @@ static void usage(const char *prog)
     printf("  -C              query BB_GET_CHAN_INFO\n");
     printf("  -B              query BB_GET_BAND_INFO\n");
     printf("  -T              query BB_GET_THROUGHPUT for TX and RX\n");
+    printf("  -V              query BB_GET_1V1_INFO\n");
 }
 
 static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status)
@@ -537,6 +556,28 @@ static int query_throughput(bb_dev_handle_t *handle, int slot)
     return 0;
 }
 
+static int query_1v1_info(bb_dev_handle_t *handle)
+{
+    bb_get_1v1_info_in_t input;
+    bb_get_1v1_info_out_t output;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    input.frame_num = 0;
+    ret = bb_ioctl(handle, BB_GET_1V1_INFO, &input, &output);
+    if (ret) {
+        printf("BB_GET_1V1_INFO failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("\n[BB_GET_1V1_INFO]\n");
+    print_1v1_info("self", &output.self);
+    print_1v1_info("peer", &output.peer);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *addr = "127.0.0.1";
@@ -552,6 +593,7 @@ int main(int argc, char **argv)
     int do_chan = 0;
     int do_band = 0;
     int do_throughput = 0;
+    int do_1v1_info = 0;
     int opt;
     int ret = 0;
     int need_link_detail;
@@ -559,7 +601,7 @@ int main(int argc, char **argv)
     bb_demo_context_t ctx;
     bb_get_status_out_t status;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMPCBT")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMPCBTV")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -588,6 +630,7 @@ int main(int argc, char **argv)
             do_chan = 1;
             do_band = 1;
             do_throughput = 1;
+            do_1v1_info = 1;
             break;
         case 'S':
             do_status = 1;
@@ -613,6 +656,9 @@ int main(int argc, char **argv)
         case 'T':
             do_throughput = 1;
             break;
+        case 'V':
+            do_1v1_info = 1;
+            break;
         default:
             usage(argv[0]);
             return -1;
@@ -620,7 +666,7 @@ int main(int argc, char **argv)
     }
 
     if (!do_status && !do_user_quality && !do_peer_quality && !do_mcs &&
-        !do_power && !do_chan && !do_band && !do_throughput) {
+        !do_power && !do_chan && !do_band && !do_throughput && !do_1v1_info) {
         do_status = 1;
         do_user_quality = 1;
         do_peer_quality = 1;
@@ -629,6 +675,7 @@ int main(int argc, char **argv)
         do_chan = 1;
         do_band = 1;
         do_throughput = 1;
+        do_1v1_info = 1;
     }
 
     if (slot < 0 || slot >= BB_SLOT_MAX) {
@@ -714,6 +761,13 @@ int main(int argc, char **argv)
 
     if (do_throughput && link_ready) {
         ret = query_throughput(ctx.handle, slot);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_1v1_info) {
+        ret = query_1v1_info(ctx.handle);
         if (ret) {
             goto done;
         }
