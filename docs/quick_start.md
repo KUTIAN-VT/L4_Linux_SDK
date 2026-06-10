@@ -1,5 +1,9 @@
 # L4 Linux SDK 快速开发指南
 
+> SDK 版本：v0.2.0  
+> 文档版本：v0.2.0  
+> 最后更新：2026-06-10
+
 本文档用于帮助开发者用最短路径把 L4 Linux SDK 跑起来。完成本文档后，应能在 Linux 环境中识别 L4-BOX、编译 SDK、启动 `l4_daemon`，并通过 `l4_linux_mvi -v` 读取设备版本信息。
 
 如果需要完整 API、配对、链路监控、链路配置和工具说明，请继续阅读 `docs/linux_development_manual.md` 和 `docs/api.md`。
