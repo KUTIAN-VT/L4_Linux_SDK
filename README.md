@@ -48,8 +48,17 @@ The ARM64 build uses `L4_Linux_SDK/compiler.arm.cmake`, which expects the
 `aarch64-none-linux-gnu` toolchain under:
 
 ```text
-/opt/toolchain/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu
+L4_Linux_SDK/toolchain/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu
 ```
+
+The compiler prefix is:
+
+```text
+bin/aarch64-none-linux-gnu-
+```
+
+If the toolchain is installed in another directory, update `GCC_PATH` in
+`compiler.arm.cmake` before running `./script/cmk-arm.sh`.
 
 ## Clean
 

@@ -4,9 +4,75 @@
 > 文档版本：v0.2.0  
 > 最后更新：2026-06-10
 
-本文档面向 Linux SDK 使用者，说明常用应用工具和 API 示例程序的使用方法。阅读本文档前，建议先完成 SDK 编译，并确认 `l4_daemon` 可以正常访问 8030 设备。
+本文档面向 Linux SDK 使用者，说明快速接入、常用工具和 API 示例的使用方法。
 
-## 使用前准备
+## 一、SDK 编译使用
+
+### 快速了解
+
+SDK 最小运行链路如下图所示：
+
+```text
++--------------------------------------------------+
+| Linux user program                               |
+| l4_basic_info / customer application             |
++-------------------------+------------------------+
+                          | Call SDK APIs
+                          v
++--------------------------------------------------+
+| libar8030_client.so                              |
+| Client library, wraps RPC communication          |
++-------------------------+------------------------+
+                          | Connect to local daemon
+                          v
++--------------------------------------------------+
+| l4_daemon                                        |
+| Device access, message forwarding, hotplug       |
++-------------------------+------------------------+
+                          | USB 
+                          v
++--------------------------------------------------+
+| L4-BOX / 8030 device                             |
+| Baseband control, status query, data transfer    |
++--------------------------------------------------+
+```
+ 
+常用文件如下：
+
+| 文件 | 说明 |
+|-|-|
+| `script/cmk-local.sh` | x86_64 本机编译脚本。 |
+| `script/cmk-arm.sh` | arm64 交叉编译脚本。 |
+| `install/<arch>/bin/l4_daemon` | 后台通信服务。 |
+| `install/<arch>/bin/l4_basic_info` | 基础信息查询和最小验证程序。 |
+| `install/<arch>/lib/libar8030_client.so` | 客户端动态库。 |
+| `com/bb_api.h` | SDK 核心 API 头文件。 |
+
+`<arch>` 根据运行平台选择：
+
+| 运行平台 | 架构目录 |
+|-|-|
+| Ubuntu PC / Ubuntu 虚拟机 | `x86_64` |
+| arm64 Linux 开发板 | `arm64` |
+
+Linux 环境至少需要：
+
+- CMake。
+- GCC / G++。
+- Shell 执行环境。
+- 可访问 L4-BOX 的 USB 权限，必要时使用 `sudo`。
+
+连接 L4-BOX 后，可先执行：
+
+```sh
+lsusb
+```
+
+正常输出示例：
+
+```text
+ID 1d6b:8030 Linux Foundation Artosyn in HS Mode
+```
 
 ### 编译 SDK
 
@@ -16,26 +82,119 @@
 cd L4_Linux_SDK
 ```
 
-本机 x86_64 编译：
+如果之前编译过，可先清理历史产物：
+
+```sh
+./script/clean.sh all
+```
+
+#### 本机 x86_64 编译
 
 ```sh
 ./script/cmk-local.sh
 ```
 
-ARM64 交叉编译：
+编译和安装产物输出到：
+
+```text
+L4_Linux_SDK/install/x86_64/
+```
+
+常用可执行程序位于 `install/x86_64/bin/` 目录，动态库位于 `install/x86_64/lib/` 目录。
+
+#### ARM64 交叉编译
+
+##### 准备交叉编译工具链
+
+当前 SDK 的 `compiler.arm.cmake` 默认期望工具链位于：
+
+```text
+L4_Linux_SDK/toolchain/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu
+```
+
+其中编译器前缀为：
+
+```text
+bin/aarch64-none-linux-gnu-
+```
+
+如果工具链放在其他目录，需要先修改 `compiler.arm.cmake` 中的 `GCC_PATH`。
+
+##### 执行交叉编译
 
 ```sh
 ./script/cmk-arm.sh
 ```
 
-编译和安装产物按架构输出到：
+编译和安装产物输出到：
 
 ```text
-L4_Linux_SDK/install/x86_64/
 L4_Linux_SDK/install/arm64/
 ```
 
-常用可执行程序位于对应架构的 `bin/` 目录，动态库位于 `lib/` 目录。
+常用可执行程序位于 `install/arm64/bin/` 目录，动态库位于 `install/arm64/lib/` 目录。
+
+### x86_64 最快验证
+
+适用于 Ubuntu PC 或 Ubuntu 虚拟机。目标是先在本机完成最小链路验证。
+
+1. 启动 `l4_daemon`：
+
+```sh
+cd L4_Linux_SDK/install/x86_64/bin
+sudo ./l4_daemon
+```
+
+2. 另开终端读取版本：
+
+```sh
+./l4_basic_info -V
+```
+
+正常输出示例：
+
+```text
+[BB_GET_SYS_INFO]
+uptime       : 51232 ms
+compile_time : 01/28/2026 19:57:27
+soft_ver     : 1.3.02-21
+hardware_ver : Unknown_4.0
+firmware_ver : KT-2458-G-V1.1.8-U
+```
+
+### arm64 最快验证
+
+适用于 arm64 Linux 开发板。PC 上编译出的 `x86_64` 程序不能直接运行在开发板上，需要先交叉编译 `arm64` 产物，再部署到开发板。
+
+1. 在 PC 侧编译 arm64 产物：
+
+```sh
+cd L4_Linux_SDK
+./script/cmk-arm.sh
+```
+
+2. 在开发板上准备目录：
+
+```sh
+mkdir -p ~/l4box/bin ~/l4box/lib
+```
+
+3. 将 `install/arm64/bin/l4_daemon`、`install/arm64/bin/l4_basic_info` 和 `install/arm64/lib/libar8030_client.so` 复制到对应目录。
+4. 在开发板上运行：
+
+```sh
+cd ~/l4box/bin
+chmod +x l4_daemon l4_basic_info
+sudo ./l4_daemon
+```
+
+5. 另开终端读取版本：
+
+```sh
+cd ~/l4box/bin
+export LD_LIBRARY_PATH=../lib:$LD_LIBRARY_PATH
+./l4_basic_info -V
+```
 
 ### 启动 daemon
 
@@ -57,6 +216,22 @@ cd L4_Linux_SDK/install/x86_64/bin
 ```
 
 如需在其它目录运行，请确保能正确找到 `libar8030_client.so` 等 SDK 动态库。
+
+### 从最小验证到开发
+
+最小验证通过后，常见调用顺序如下：
+
+```text
+bb_host_connect("127.0.0.1", BB_PORT_DEFAULT)
+  -> bb_dev_getlist(...)
+  -> bb_dev_open(...)
+  -> bb_ioctl(..., BB_GET_SYS_INFO, ...)
+  -> bb_dev_close(...)
+  -> bb_dev_freelist(...)
+  -> bb_host_disconnect(...)
+```
+
+建议先参考 `examples/01_basic_info` 的基础信息查询流程，再根据需求阅读 `examples/02_pair_manager` 到 `examples/04_link_config`。
 
 ### 通用参数说明
 
@@ -95,7 +270,7 @@ cd L4_Linux_SDK/install/x86_64/bin
 ./l4_link_monitor -a 192.168.1.10 -p 9000 -i 1 -S
 ```
 
-## 一、应用工具
+## 二、应用工具
 
 ### 1、固件升级工具
 
@@ -249,7 +424,7 @@ rtt min/avg/max/mdev = 27.678/30.619/34.187/2.471 ms
 ```
 
 
-## 二、API 调用示例
+## 三、API 示例
 
 SDK 在 `examples/` 下提供 4 个常用 API 示例。它们都复用 `examples/00_common` 中的公共连接流程：
 
@@ -943,7 +1118,7 @@ mode=0
   bw_mode=Y24X2 major_dir=DEV->AP
 ```
 
-## 常见问题
+## 四、常见问题
 
 ### 1、程序提示没有设备
 
@@ -986,4 +1161,15 @@ mode=0
 ```text
 L4_Linux_SDK/docs/api.md
 ```
+
+### 6、常见问题速查
+
+| 现象 | 优先检查 |
+|-|-|
+| `lsusb` 看不到设备 | L4-BOX 是否上电，USB 线是否正常，虚拟机是否已接管 USB，开发板是否处于 USB Host 模式。 |
+| `l4_daemon` 启动失败 | 是否使用 `sudo`，文件是否有执行权限，设备是否被其他程序占用。 |
+| `l4_basic_info` 提示找不到 `.so` | 是否执行 `export LD_LIBRARY_PATH=../lib:$LD_LIBRARY_PATH`，`libar8030_client.so` 是否与程序架构一致。 |
+| 连接 daemon 失败 | `l4_daemon` 是否仍在运行，端口是否被占用，客户端是否连接默认地址 `127.0.0.1` 和默认端口。 |
+| 提示没有设备 | `lsusb` 是否能看到 L4-BOX，`l4_daemon` 是否有设备访问权限。 |
+| arm64 程序无法运行 | 是否误用了 `install/x86_64` 产物，开发板上应使用 `install/arm64` 产物。 |
 
