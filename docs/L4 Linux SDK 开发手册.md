@@ -231,7 +231,7 @@ bb_host_connect("127.0.0.1", BB_PORT_DEFAULT)
   -> bb_host_disconnect(...)
 ```
 
-建议先参考 `examples/01_basic_info` 的基础信息查询流程，再根据需求阅读 `examples/02_pair_manager` 到 `examples/04_link_config`。
+建议先参考 `examples/01_basic_info` 的基础信息查询流程，再根据需求阅读 `examples/02_pair_manager` 到 `examples/05_config_file`。
 
 ### 通用参数说明
 
@@ -426,7 +426,7 @@ rtt min/avg/max/mdev = 27.678/30.619/34.187/2.471 ms
 
 ## 三、API 示例
 
-SDK 在 `examples/` 下提供 4 个常用 API 示例。它们都复用 `examples/00_common` 中的公共连接流程：
+SDK 在 `examples/` 下提供 5 个常用 API 示例。它们都复用 `examples/00_common` 中的公共连接流程：
 
 ```text
 bb_host_connect()
@@ -1117,6 +1117,49 @@ mode=0
 
   bw_mode=Y24X2 major_dir=DEV->AP
 ```
+
+### 5、配置文件管理示例
+
+`l4_config_file` 用于导出、写入和恢复设备配置文件。该示例演示 `BB_GET_CFG`、`BB_SET_CFG` 和 `BB_RESET_CFG` 的分片调用流程。
+
+#### 5.1 程序参数说明
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `-g <file>` | 调用 `BB_GET_CFG`，导出配置到本地文件 | 不执行 |
+| `-s <file>` | 调用 `BB_SET_CFG`，把本地文件写入设备 | 不执行 |
+| `-r` | 调用 `BB_RESET_CFG`，恢复设备配置 | 不执行 |
+| `-m <mode>` | `BB_GET_CFG` 读取模式，支持 `auto`、`memory`、`flash` 或 `0`、`1`、`2` | `auto` |
+
+`-g`、`-s`、`-r` 三个动作必须且只能指定一个，避免一次命令同时执行多个配置文件操作。
+
+#### 5.2 示例
+
+导出配置文件：
+
+```sh
+./l4_config_file -g cfg.json
+```
+
+从 flash 导出配置文件：
+
+```sh
+./l4_config_file -m flash -g cfg_flash.json
+```
+
+写入配置文件：
+
+```sh
+./l4_config_file -s cfg.json
+```
+
+恢复设备配置文件：
+
+```sh
+./l4_config_file -r
+```
+
+导出时，程序会校验设备返回的 `total_length` 和 `total_crc16`；写入时，程序会先计算本地文件 CRC，再按 `bb_set_cfg_t.data` 最大长度分片下发。
 
 ## 四、常见问题
 
