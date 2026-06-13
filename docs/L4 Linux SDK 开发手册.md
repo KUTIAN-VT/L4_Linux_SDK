@@ -426,7 +426,7 @@ rtt min/avg/max/mdev = 27.678/30.619/34.187/2.471 ms
 
 ## 三、API 示例
 
-SDK 在 `examples/` 下提供 5 个常用 API 示例。它们都复用 `examples/00_common` 中的公共连接流程：
+SDK 在 `examples/` 下提供 6 个常用 API 示例。它们都复用 `examples/00_common` 中的公共连接流程：
 
 ```text
 bb_host_connect()
@@ -648,7 +648,7 @@ DEV 侧手动设置 AP MAC：
 
 ### 3、链路监控示例
 
-`l4_link_monitor` 用于在配对完成后读取链路状态、信号质量、MCS、功率、信道、频段和吞吐信息。
+`l4_link_monitor` 用于在配对完成后读取链路状态、信号质量、MCS、功率、信道、频段、吞吐和测距结果。
 
 #### 3.1 程序参数说明
 
@@ -662,14 +662,16 @@ DEV 侧手动设置 AP MAC：
 | `-M`        | 查询 `BB_GET_MCS`            | 无    |
 | `-P`        | 查询 `BB_GET_CUR_POWER`      | 无    |
 | `-C`        | 查询 `BB_GET_CHAN_INFO`      | 无    |
+| `-R`        | 配合 `-C` 查询对端 slot 的信道信息 | 无    |
 | `-B`        | 查询 `BB_GET_BAND_INFO`      | 无    |
 | `-T`        | 查询 `BB_GET_THROUGHPUT`     | 无    |
+| `-D`        | 查询 `BB_GET_DISTC_RESULT`   | 无    |
 | `-V`        | 查询 `BB_GET_1V1_INFO`       | 无    |
 | `-s <slot>` | 目标 slot；DEV 侧 slot 0 表示 AP | `0`  |
 | `-u <user>` | 物理用户编号                     | `0`  |
 
 
-链路质量、MCS、功率和吞吐等细节需要在配对完成、链路连接后读取。程序会先查询 `BB_GET_STATUS` 判断目标 slot 是否可用。
+链路质量、MCS、功率、吞吐和测距结果等细节需要在配对完成、链路连接后读取。程序会先查询 `BB_GET_STATUS` 判断目标 slot 是否可用。
 
 #### 3.2 标准使用方法
 
@@ -678,6 +680,7 @@ DEV 侧手动设置 AP MAC：
 3. 执行 `l4_link_monitor` 查询全量链路信息。
 4. 根据需要通过 `-S/-Q/-M/-T/-V` 等参数查询指定信息。
 5. AP 侧通过 `-s` 指定目标 DEV 所在 slot；DEV 侧通常使用 `-s 0` 查看 AP 方向。
+6. `-C` 默认查询本机信道信息；AP 侧需要查询 DEV 信道信息时，使用 `-C -R -s <slot>`。
 
 #### 3.3 示例
 
@@ -779,6 +782,8 @@ user[0]: power=15
 
 ##### 3.3.6 查询信道信息
 
+查询本机信道信息：
+
 ```sh
 ./l4_link_monitor -C
 ```
@@ -786,7 +791,7 @@ user[0]: power=15
 正常输出示例：
 
 ```text
-[BB_GET_CHAN_INFO]
+[BB_GET_CHAN_INFO local]
 chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
   chan[0]: freq=2400000 KHz power=-92 dbm
   chan[1]: freq=2411000 KHz power=-79 dbm
@@ -822,6 +827,23 @@ chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
   chan[31]: freq=5840000 KHz power=-100 dbm
 ```
 
+查询对端信道信息时，增加 `-R`，并通过 `-s <slot>` 指定对端所在 slot。例如 AP 侧查询 slot 0 的 DEV 信道信息：
+
+```sh
+./l4_link_monitor -C -R -s 0
+```
+
+输出标题会显示远程 slot：
+
+```text
+[BB_GET_CHAN_INFO remote slot=0]
+chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
+  chan[0]: freq=2400000 KHz power=-92 dbm
+  ...
+```
+
+`-R` 会将 `BB_GET_CHAN_INFO` 封装进 `BB_REMOTE_IOCTL_REQ`，由 `-s` 指定的对端 slot 执行查询。不带 `-R` 时，`-C` 仍查询本机信道信息。
+
 ##### 3.3.7 查询频段信息
 
 ```sh
@@ -848,6 +870,21 @@ band_mode=AUTO(1) work_band=5G(2)
   TX: phy=232960 real=26112
   RX: phy=11471040 real=53664
 ```
+
+##### 3.3.9 查询测距结果
+
+```sh
+./l4_link_monitor -D -s 0
+```
+
+正常输出示例：
+
+```text
+[BB_GET_DISTC_RESULT] slot=0
+  slot[0]: distance=123
+```
+
+`-D` 会调用 `BB_GET_DISTC_RESULT`，通过 `-s <slot>` 指定读取的 slot，并输出 SDK 返回的 `distance[slot]`。当 `distance=-1` 时，表示当前没有测距结果。
 
 ### 4、链路设置示例
 
@@ -1160,6 +1197,455 @@ mode=0
 ```
 
 导出时，程序会校验设备返回的 `total_length` 和 `total_crc16`；写入时，程序会先计算本地文件 CRC，再按 `bb_set_cfg_t.data` 最大长度分片下发。
+
+
+### 6、MiniDB 配置示例
+
+`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段和功率等配置项。
+
+MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 MiniDB 后，配置需要重启设备后才生效；建议设置或重置后使用 `-H` 重启设备，重启完成后再查询确认。
+
+#### 6.1 程序参数说明
+
+| 参数 | 长参数 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `-A` | `--get-all` | 查询 role、AP MAC、slot 0 MAC、band 和 power | 不执行 |
+| `-r` | `--get-role` | 查询 MiniDB 中保存的 role | 不执行 |
+| `-m` | `--get-ap-mac` | 查询 MiniDB 中保存的 AP MAC | 不执行 |
+| `-s [slot]` | `--get-slot-mac[=slot]` | 查询 MiniDB 中保存的 slot MAC | slot 0 |
+| `-b` | `--get-band` | 查询 MiniDB 中保存的 band bitmap | 不执行 |
+| `-w` | `--get-pwr` | 查询 MiniDB 中保存的 power 配置 | 不执行 |
+| `-R <ap|dev|0|1>` | `--set-role <...>` | 设置 MiniDB role | 不执行 |
+| `-M <mac>` | `--set-ap-mac <mac>` | 设置 MiniDB AP MAC | 不执行 |
+| `-S <mac|slot,mac>` | `--set-slot-mac <mac|slot,mac>` | 设置 MiniDB slot MAC | slot 0 |
+| `-B <auto|2g|5g|bitmap>` | `--set-band <...>` | 设置 MiniDB band bitmap | 不执行 |
+| `-W <pwr|min,max>` | `--set-pwr <...>` | 设置 MiniDB 固定功率或功率自适应区间 | 不执行 |
+| `-D` | `--reset` | 重置 MiniDB | 不执行 |
+| `-H` | `--reboot` | 单独重启设备，或设置/重置成功后重启设备 | 不执行 |
+
+每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`-H` 可以单独作为重启动作，也可以附加在设置或重置动作后；`-H` 不能和查询动作组合。
+
+#### 6.2 输入格式
+
+MAC 支持冒号分隔或连续十六进制两种格式。当前 SDK 中 `BB_MAC_LEN = 4`，因此 AP MAC 和 slot MAC 都按 4 字节输入：
+
+```text
+11:22:33:44
+11223344
+```
+
+band bitmap 支持名称和数值：
+
+| 输入 | bitmap | 说明 |
+| --- | --- | --- |
+| `auto` | `0x07` | 自动频段配置 |
+| `2g` | `0x02` | 仅 2G |
+| `5g` | `0x04` | 仅 5G |
+| `0x07`、`0x02`、`0x04` 等数值 | 输入值 | 自定义 bitmap |
+
+功率设置范围为 `10-27`：
+
+| 输入 | 行为 |
+| --- | --- |
+| `-W 20` | 设置固定功率，写入 `pwr_auto=0`、`pwr_init=20` |
+| `-W 10,27` | 设置自适应功率区间，写入 `pwr_auto=1`、`pwr_min=10`、`pwr_max=27` |
+
+#### 6.3 示例
+
+以下示例按“先设置，再查询确认”的顺序组织。由于程序每次运行只允许一个主动作，设置和查询需要分两次执行；如果需要确认设备运行态是否生效，设置后先使用 `-H` 重启设备，重启完成后再查询。
+
+##### 6.3.1 设置 role 为 AP 后查询
+
+将 MiniDB role 设置为 AP：
+
+```sh
+./l4_minidb_config -R ap
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_ROLE]
+role=AP(0)
+set minidb role ok
+```
+
+查询确认 MiniDB 中保存的设备角色：
+
+```sh
+./l4_minidb_config -r
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_ROLE]
+role=AP(0)
+```
+
+##### 6.3.2 设置 role 为 DEV 后查询
+
+将 MiniDB role 设置为 DEV：
+
+```sh
+./l4_minidb_config -R dev
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_ROLE]
+role=DEV(1)
+set minidb role ok
+```
+
+查询确认 MiniDB 中保存的设备角色：
+
+```sh
+./l4_minidb_config -r
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_ROLE]
+role=DEV(1)
+```
+
+##### 6.3.3 设置 AP MAC 后查询
+
+写入 MiniDB AP MAC：
+
+```sh
+./l4_minidb_config -M 11:22:33:44
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_AP_MAC]
+ap_mac=11:22:33:44
+set minidb AP MAC ok
+```
+
+查询确认 MiniDB 中保存的 AP MAC：
+
+```sh
+./l4_minidb_config -m
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_AP_MAC]
+ap_mac=11:22:33:44
+```
+
+##### 6.3.4 设置默认 slot MAC 后查询
+
+不指定 slot 时，默认写入 slot 0 MAC：
+
+```sh
+./l4_minidb_config -S 11:22:33:44
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_SLOT_MAC]
+slot=0 mac=11:22:33:44
+set minidb slot MAC ok
+```
+
+查询确认 slot 0 MAC：
+
+```sh
+./l4_minidb_config -s
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_SLOT_MAC]
+slot=0 mac=11:22:33:44
+```
+
+##### 6.3.5 设置指定 slot MAC 后查询
+
+写入 slot 1 MAC：
+
+```sh
+./l4_minidb_config -S 1,11:22:33:44
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_SLOT_MAC]
+slot=1 mac=11:22:33:44
+set minidb slot MAC ok
+```
+
+查询确认 slot 1 MAC：
+
+```sh
+./l4_minidb_config -s 1
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_SLOT_MAC]
+slot=1 mac=11:22:33:44
+```
+
+##### 6.3.6 设置 band 为自动后查询
+
+将 MiniDB band bitmap 设置为 `auto(0x07)`：
+
+```sh
+./l4_minidb_config -B auto
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_BAND]
+band=auto(0x07)
+set minidb band ok
+```
+
+查询确认 MiniDB 中保存的频段 bitmap：
+
+```sh
+./l4_minidb_config -b
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_BAND]
+band=auto(0x07)
+```
+
+##### 6.3.7 设置 band 为 2G 后查询
+
+将 MiniDB band bitmap 设置为 `2g(0x02)`：
+
+```sh
+./l4_minidb_config -B 2g
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_BAND]
+band=2g(0x02)
+set minidb band ok
+```
+
+查询确认 MiniDB 中保存的频段 bitmap：
+
+```sh
+./l4_minidb_config -b
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_BAND]
+band=2g(0x02)
+```
+
+##### 6.3.8 设置 band 为 5G 后查询
+
+将 MiniDB band bitmap 设置为 `5g(0x04)`：
+
+```sh
+./l4_minidb_config -B 5g
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_BAND]
+band=5g(0x04)
+set minidb band ok
+```
+
+查询确认 MiniDB 中保存的频段 bitmap：
+
+```sh
+./l4_minidb_config -b
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_BAND]
+band=5g(0x04)
+```
+
+##### 6.3.9 设置固定功率后查询
+
+将 MiniDB power 设置为固定功率 20 dBm：
+
+```sh
+./l4_minidb_config -W 20
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_PWR]
+pwr_auto=off(0)
+pwr_init=20 dBm
+set minidb power ok
+```
+
+查询确认 MiniDB 中保存的功率配置：
+
+```sh
+./l4_minidb_config -w
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_PWR]
+pwr_auto=off(0)
+pwr_init=20 dBm
+```
+
+##### 6.3.10 设置功率自适应区间后查询
+
+将 MiniDB power 设置为自适应功率区间 10-27 dBm：
+
+```sh
+./l4_minidb_config -W 10,27
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_PWR]
+pwr_auto=on(1)
+pwr_min=10 dBm
+pwr_max=27 dBm
+set minidb power ok
+```
+
+查询确认 MiniDB 中保存的功率配置：
+
+```sh
+./l4_minidb_config -w
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_PWR]
+pwr_auto=on(1)
+pwr_min=10 dBm
+pwr_max=27 dBm
+```
+
+##### 6.3.11 重置 MiniDB 后查询
+
+清除 MiniDB 持久化配置：
+
+```sh
+./l4_minidb_config -D
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_RESET_DB]
+reset minidb ok
+```
+
+查询确认 role、AP MAC、slot 0 MAC、band 和 power：
+
+```sh
+./l4_minidb_config -A
+```
+
+正常调用示例：
+
+```text
+[MiniDB]
+role     : unset
+ap_mac   : unset
+slot_mac0: unset
+band     : unset
+power    : unset
+```
+
+##### 6.3.12 设置后查询全部 MiniDB 信息
+
+完成所需设置后，可查询 role、AP MAC、slot 0 MAC、band 和 power：
+
+```sh
+./l4_minidb_config -A
+```
+
+正常调用示例：
+
+```text
+[MiniDB]
+role     : AP(0)
+ap_mac   : 11:22:33:44
+slot_mac0: 11:22:33:44
+band     : auto(0x07)
+power    : fixed init=20 dBm
+```
+
+##### 6.3.13 设置后自动重启设备并查询
+
+`-H` 可以附加在设置动作后。下面示例先设置 band 为自动，再请求设备重启，使 MiniDB 修改生效：
+
+```sh
+./l4_minidb_config -B auto -H
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_BAND]
+band=auto(0x07)
+set minidb band ok
+[BB_SET_SYS_REBOOT]
+reboot requested
+```
+
+设备重启完成后，再查询确认 MiniDB 中保存的频段 bitmap：
+
+```sh
+./l4_minidb_config -b
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_BAND]
+band=auto(0x07)
+```
+
+##### 6.3.14 单独重启设备
+
+不修改 MiniDB，只请求设备重启：
+
+```sh
+./l4_minidb_config -H
+```
+
+正常调用示例：
+
+```text
+[BB_SET_SYS_REBOOT]
+reboot requested
+```
 
 ## 四、常见问题
 

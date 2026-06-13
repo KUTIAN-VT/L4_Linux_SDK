@@ -1,6 +1,6 @@
 # 03_link_monitor 对频后链路信息读取示例
 
-`l4_link_monitor` 用于在 AP 和 DEV 对频完成后读取链路状态、信号质量、MCS、功率、信道和吞吐信息。它适合用作图传链路体检工具。
+`l4_link_monitor` 用于在 AP 和 DEV 对频完成后读取链路状态、信号质量、MCS、功率、信道、吞吐和测距结果。它适合用作图传链路体检工具。
 
 ## 常用命令
 
@@ -15,6 +15,12 @@
 ```
 
 只查询 slot 0 的 TX/RX 实时吞吐。
+
+```sh
+./l4_link_monitor -s 0 -D
+```
+
+只查询 slot 0 的测距结果。
 
 ```sh
 ./l4_link_monitor -s 0 -M
@@ -33,6 +39,12 @@
 ```
 
 只查询当前频段控制模式和工作频段。`band_mode=0` 表示手动控制，`band_mode=1` 表示频段自适应。
+
+```sh
+./l4_link_monitor -C -R -s 0
+```
+
+通过 slot 0 远程查询对端设备的信道信息。不带 `-R` 时，`-C` 仍查询本机信道信息。
 
 ```sh
 ./l4_link_monitor -V
@@ -56,8 +68,10 @@
 | `-M` | 查询 `BB_GET_MCS` |
 | `-P` | 查询 `BB_GET_CUR_POWER` |
 | `-C` | 查询 `BB_GET_CHAN_INFO` |
+| `-R` | 配合 `-C` 查询 `-s <slot>` 指定的对端信道信息 |
 | `-B` | 查询 `BB_GET_BAND_INFO` |
 | `-T` | 查询 `BB_GET_THROUGHPUT` |
+| `-D` | 查询 `BB_GET_DISTC_RESULT` |
 | `-V` | 查询 `BB_GET_1V1_INFO` |
 
 ## 读取的信息
@@ -72,13 +86,14 @@
 | `BB_GET_CHAN_INFO` | 信道数量、自适应模式、ACS 信道、工作信道、频点和扫频能量 |
 | `BB_GET_BAND_INFO` | 频段控制模式：`0=手动`、`1=自适应`，以及当前工作频段 |
 | `BB_GET_THROUGHPUT` | 指定 slot 的 TX/RX 物理吞吐和实际承载吞吐 |
+| `BB_GET_DISTC_RESULT` | 指定 slot 的测距结果，`-1` 表示当前无测距结果 |
 | `BB_GET_1V1_INFO` | 1V1 模式 self/peer 链路信息：SNR、LDPC 错误比例、gain、TX MCS、TX channel、TX power、TX 频点 |
 
 
 
 ## 读取前置条件
 
-`BB_GET_USER_QUALITY`、`BB_GET_PEER_QUALITY`、`BB_GET_MCS`、`BB_GET_CUR_POWER`、`BB_GET_THROUGHPUT` 这些链路细节只有在图传已经对频/连接后才读取。程序会先读取 `BB_GET_STATUS`，确认指定 slot 满足 `pair_state=1` 或 `state=CONNECT`；如果不满足，会打印当前状态并跳过链路细节查询。
+`BB_GET_USER_QUALITY`、`BB_GET_PEER_QUALITY`、`BB_GET_MCS`、`BB_GET_CUR_POWER`、`BB_GET_THROUGHPUT`、`BB_GET_DISTC_RESULT` 这些链路细节只有在图传已经对频/连接后才读取。程序会先读取 `BB_GET_STATUS`，确认指定 slot 满足 `pair_state=1` 或 `state=CONNECT`；如果不满足，会打印当前状态并跳过链路细节查询。
 
 `BB_GET_STATUS`、`BB_GET_CHAN_INFO`、`BB_GET_BAND_INFO` 和 `BB_GET_1V1_INFO` 可作为基础状态信息单独读取。
 
@@ -89,6 +104,7 @@
 - `slot link status` 中的 `rx_mcs_raw` 也按 `rx_mcs_raw - 2` 输出真实值 `rx_mcs_real`。
 - `user phy status` 会按角色映射逻辑 RX/TX：AP RX=`BB_USER_0.rx`、AP TX=`BB_USER_BR_CS.tx`、DEV RX=`BB_USER_BR_CS.rx`、DEV TX=`BB_USER_0.tx`。RX 只输出 RX 对象，不使用 RX 端物理 MCS 字段。
 - `bw_mode` 和 `major_dir` 只根据 RX 行的 `tintlv_len/tintlv_num` 解释，并单独一行输出。`tintlv_len=3,tintlv_num=1` 显示为 `Y24X2`，大带宽方向 `DEV->AP`；`tintlv_len=2,tintlv_num=0` 显示为 `Y12X1`，大带宽方向 `AP->DEV`。
+- 测距结果直接输出 SDK 返回的 `distance[slot]`；`-1` 表示当前没有测距结果。
 
 ## slot 和 user
 
