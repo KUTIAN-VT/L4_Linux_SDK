@@ -190,24 +190,88 @@ static void usage(const char *prog)
     printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
+    printf("  -s <slot>       remote slot id for -R, default: 0; DEV uses slot 0 as AP\n");
     printf("  -S              query BB_GET_STATUS\n");
     printf("  -V              query BB_GET_SYS_INFO\n");
+    printf("  -R              query peer device by remote ioctl through -s <slot>\n");
     printf("  -A              query all basic information, default action\n");
 }
 
-static int query_sys_info(bb_dev_handle_t *handle)
+static int basic_info_ioctl(bb_dev_handle_t *handle,
+                            uint32_t request,
+                            const void *input,
+                            uint16_t input_len,
+                            void *output,
+                            uint16_t output_len,
+                            int remote_slot)
+{
+    bb_remote_ioctl_in_t remote_in;
+    bb_remote_ioctl_out_t remote_out;
+    int ret;
+
+    if (remote_slot < 0) {
+        return bb_ioctl(handle, request, input, output);
+    }
+
+    if ((input_len && !input) || input_len > sizeof(remote_in.data) ||
+        output_len > sizeof(remote_out.data)) {
+        printf("remote ioctl buffer invalid, request=0x%x in_len=%u out_len=%u\n",
+               request,
+               input_len,
+               output_len);
+        return -1;
+    }
+
+    memset(&remote_in, 0, sizeof(remote_in));
+    memset(&remote_out, 0, sizeof(remote_out));
+
+    if (input_len) {
+        memcpy(remote_in.data, input, input_len);
+    }
+
+    remote_in.len = input_len;
+    remote_in.slot = (uint8_t)remote_slot;
+    remote_in.msg_id = request;
+
+    ret = bb_ioctl(handle, BB_REMOTE_IOCTL_REQ, &remote_in, &remote_out);
+    if (ret) {
+        return ret;
+    }
+
+    if (output && output_len) {
+        memcpy(output, remote_out.data, output_len);
+    }
+
+    return 0;
+}
+
+static int query_sys_info(bb_dev_handle_t *handle, int remote_slot)
 {
     bb_get_sys_info_out_t info;
     int ret;
 
     memset(&info, 0, sizeof(info));
-    ret = bb_ioctl(handle, BB_GET_SYS_INFO, NULL, &info);
+    ret = basic_info_ioctl(handle,
+                           BB_GET_SYS_INFO,
+                           NULL,
+                           0,
+                           &info,
+                           sizeof(info),
+                           remote_slot);
     if (ret) {
-        printf("BB_GET_SYS_INFO failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_SYS_INFO remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_SYS_INFO failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_SYS_INFO]\n");
+    if (remote_slot >= 0) {
+        printf("\n[BB_GET_SYS_INFO remote slot=%d]\n", remote_slot);
+    } else {
+        printf("\n[BB_GET_SYS_INFO]\n");
+    }
     printf("uptime       : %llu ms\n", (unsigned long long)info.uptime);
     printf("compile_time : %s\n", info.compile_time);
     printf("soft_ver     : %s\n", info.soft_ver);
@@ -216,7 +280,7 @@ static int query_sys_info(bb_dev_handle_t *handle)
     return 0;
 }
 
-static int query_status(bb_dev_handle_t *handle)
+static int query_status(bb_dev_handle_t *handle, int remote_slot)
 {
     bb_get_status_in_t input;
     bb_get_status_out_t status;
@@ -226,13 +290,27 @@ static int query_status(bb_dev_handle_t *handle)
     memset(&status, 0, sizeof(status));
 
     input.user_bmp = 0xffff;
-    ret = bb_ioctl(handle, BB_GET_STATUS, &input, &status);
+    ret = basic_info_ioctl(handle,
+                           BB_GET_STATUS,
+                           &input,
+                           sizeof(input),
+                           &status,
+                           sizeof(status),
+                           remote_slot);
     if (ret) {
-        printf("BB_GET_STATUS failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_STATUS remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_STATUS failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_STATUS]\n");
+    if (remote_slot >= 0) {
+        printf("\n[BB_GET_STATUS remote slot=%d]\n", remote_slot);
+    } else {
+        printf("\n[BB_GET_STATUS]\n");
+    }
     printf("role        : %s (%u)\n", role_name(status.role), status.role);
     printf("mode        : %s (%u)\n", mode_name(status.mode), status.mode);
     printf("sync_mode   : %u\n", status.sync_mode);
@@ -272,13 +350,15 @@ int main(int argc, char **argv)
     const char *addr = "127.0.0.1";
     int port = BB_PORT_DEFAULT;
     int dev_index = 0;
+    int slot = 0;
     int do_status = 0;
     int do_sys_info = 0;
+    int remote = 0;
     int opt;
     int ret;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:SVA")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:SVRA")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -292,11 +372,17 @@ int main(int argc, char **argv)
         case 'i':
             dev_index = (int)strtol(optarg, NULL, 10);
             break;
+        case 's':
+            slot = (int)strtol(optarg, NULL, 10);
+            break;
         case 'S':
             do_status = 1;
             break;
         case 'V':
             do_sys_info = 1;
+            break;
+        case 'R':
+            remote = 1;
             break;
         case 'A':
             do_status = 1;
@@ -313,20 +399,25 @@ int main(int argc, char **argv)
         do_sys_info = 1;
     }
 
+    if (slot < 0 || slot >= BB_SLOT_MAX) {
+        printf("invalid slot %d, valid range: 0-%d\n", slot, BB_SLOT_MAX - 1);
+        return -1;
+    }
+
     ret = bb_demo_open(&ctx, addr, port, dev_index);
     if (ret) {
         return -1;
     }
 
     if (do_sys_info) {
-        ret = query_sys_info(ctx.handle);
+        ret = query_sys_info(ctx.handle, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_status) {
-        ret = query_status(ctx.handle);
+        ret = query_status(ctx.handle, remote ? slot : -1);
         if (ret) {
             goto done;
         }

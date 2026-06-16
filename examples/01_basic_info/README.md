@@ -27,6 +27,7 @@
 | `-S` | 查询 `BB_GET_STATUS`，打印角色、模式、MAC、slot 链路状态和 user phy 状态 |
 | `-V` | 查询 `BB_GET_SYS_INFO`，打印运行时间、编译时间和版本信息 |
 | `-A` | 查询全部基础信息，也就是同时执行 `-S` 和 `-V` |
+| `-R` | 通过远程 ioctl 查询 `-s <slot>` 指定对端的基础信息；可配合 `-S`、`-V` 或 `-A` 使用 |
 
 如果不带 `-S`、`-V` 或 `-A`，程序默认执行 `-A`。
 
@@ -37,6 +38,7 @@
 | `-a <addr>` | daemon 地址 | `127.0.0.1` |
 | `-p <port>` | daemon 端口 | `BB_PORT_DEFAULT` |
 | `-i <index>` | 选择第几个设备 | `0` |
+| `-s <slot>` | `-R` 远程查询使用的对端 slot；DEV 侧 slot 0 表示 AP | `0` |
 | `-h` | 打印帮助信息 | 无 |
 
 ## 3. 最常用的操作方式
@@ -70,6 +72,21 @@
 ```
 
 这会调用 `BB_GET_SYS_INFO`，用于查看设备运行时间、编译时间、软件版本、硬件版本和固件版本。
+
+### 远程查询对端基础信息
+
+```sh
+./l4_basic_info -R -s 0
+```
+
+`-R` 会把 `BB_GET_SYS_INFO` 和 `BB_GET_STATUS` 封装成 `BB_REMOTE_IOCTL_REQ`，通过 `-s <slot>` 指定的链路位置发给对端设备。不带 `-S`、`-V` 或 `-A` 时仍按默认动作查询全部基础信息。
+
+也可以只查询对端某一类信息：
+
+```sh
+./l4_basic_info -R -s 0 -S
+./l4_basic_info -R -s 0 -V
+```
 
 ### 指定 daemon 地址和端口
 
@@ -106,9 +123,9 @@
     |
 打开指定 index 的设备
     |
-查询 BB_GET_SYS_INFO
+查询 BB_GET_SYS_INFO（本端；带 -R 时查询对端）
     |
-查询 BB_GET_STATUS
+查询 BB_GET_STATUS（本端；带 -R 时查询对端）
     |
 关闭设备连接和 daemon 连接
 ```
@@ -260,7 +277,7 @@ user phy status:
 
 ### `device index` 不是 slot
 
-`-i <index>` 选择的是 daemon 枚举到的第几个物理设备。`slot` 是设备内部的链路位置，两者不是一回事。
+`-i <index>` 选择的是 daemon 枚举到的第几个物理设备。`-s <slot>` 只在 `-R` 远程查询时使用，表示通过哪个链路位置访问对端。两者不是一回事。
 
 ### 没有打印 slot 或 user 不一定是错误
 
@@ -271,8 +288,9 @@ user phy status:
 | 函数 | 做的事情 |
 | --- | --- |
 | `main()` | 解析参数、打开设备、按参数执行系统信息和状态查询 |
-| `query_sys_info()` | 调用 `BB_GET_SYS_INFO` 并打印版本信息 |
-| `query_status()` | 调用 `BB_GET_STATUS` 并打印角色、模式、链路和物理层状态 |
+| `query_sys_info()` | 调用 `BB_GET_SYS_INFO` 并打印版本信息；带 `-R` 时通过远程 ioctl 查询对端 |
+| `query_status()` | 调用 `BB_GET_STATUS` 并打印角色、模式、链路和物理层状态；带 `-R` 时通过远程 ioctl 查询对端 |
+| `basic_info_ioctl()` | 根据是否启用 `-R` 选择本地 `bb_ioctl()` 或 `BB_REMOTE_IOCTL_REQ` |
 | `role_name()` | 把角色枚举值转换成可读字符串 |
 | `mode_name()` | 把模式枚举值转换成可读字符串 |
 | `link_state_name()` | 把链路状态枚举值转换成可读字符串 |
@@ -282,4 +300,4 @@ user phy status:
 
 ## 8. 一句话总结
 
-`l4_basic_info` 做的事情就是：连接 daemon，打开指定 8030 设备，然后用 `BB_GET_SYS_INFO` 查询版本信息，用 `BB_GET_STATUS` 查询当前角色、模式、链路和物理层状态。
+`l4_basic_info` 做的事情就是：连接 daemon，打开指定 8030 设备，然后用 `BB_GET_SYS_INFO` 查询版本信息，用 `BB_GET_STATUS` 查询当前角色、模式、链路和物理层状态；带 `-R` 时通过指定 slot 远程查询对端的这些基础信息。
