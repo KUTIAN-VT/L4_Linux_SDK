@@ -269,7 +269,7 @@ static void usage(const char *prog)
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
     printf("  -s <slot>       slot id, default: 0; DEV uses slot 0 as AP\n");
-    printf("  -u <user>       physical user id, default: 0\n");
+    printf("  -u <user>       physical user id for -Q/-P; -Q default: AP=0, DEV=8\n");
     printf("  -A              query all link information, default action\n");
     printf("  -S              query BB_GET_STATUS\n");
     printf("  -Q              query BB_GET_USER_QUALITY\n");
@@ -430,6 +430,18 @@ static int link_ready_for_slot(const bb_get_status_out_t *status, int slot)
 
     link = &status->link_status[slot];
     return link->pair_state || link->state == BB_LINK_STATE_CONNECT;
+}
+
+static int default_quality_user_for_role(uint8_t role)
+{
+    switch (role) {
+    case BB_ROLE_AP:
+        return BB_USER_0;
+    case BB_ROLE_DEV:
+        return BB_USER_BR_CS;
+    default:
+        return BB_USER_0;
+    }
 }
 
 static int query_user_quality(bb_dev_handle_t *handle, int user, int remote_slot)
@@ -770,6 +782,7 @@ int main(int argc, char **argv)
     int dev_index = 0;
     int slot = 0;
     int user = 0;
+    int user_specified = 0;
     int do_status = 0;
     int do_user_quality = 0;
     int do_peer_quality = 0;
@@ -807,6 +820,7 @@ int main(int argc, char **argv)
             break;
         case 'u':
             user = (int)strtol(optarg, NULL, 10);
+            user_specified = 1;
             break;
         case 'A':
             do_status = 1;
@@ -915,7 +929,8 @@ int main(int argc, char **argv)
     }
 
     if (do_user_quality && link_ready) {
-        ret = query_user_quality(ctx.handle, user, remote ? slot : -1);
+        int quality_user = user_specified ? user : default_quality_user_for_role(status.role);
+        ret = query_user_quality(ctx.handle, quality_user, remote ? slot : -1);
         if (ret) {
             goto done;
         }

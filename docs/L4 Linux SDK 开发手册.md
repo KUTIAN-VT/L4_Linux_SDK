@@ -667,10 +667,10 @@ DEV 侧手动设置 AP MAC：
 | `-D`        | 查询 `BB_GET_DISTC_RESULT`   | 无    |
 | `-V`        | 查询 `BB_GET_1V1_INFO`       | 无    |
 | `-s <slot>` | 目标 slot；DEV 侧 slot 0 表示 AP | `0`  |
-| `-u <user>` | 物理用户编号                     | `0`  |
+| `-u <user>` | 指定 `-Q`/`-P` 的物理用户；未指定时 `-Q` 按角色默认 AP=0、DEV=8，`-P` 默认 0 | 见说明 |
 
 
-链路质量、MCS、功率、吞吐和测距结果等细节需要在配对完成、链路连接后读取。程序会先查询 `BB_GET_STATUS` 判断目标 slot 是否可用。
+链路质量、MCS、功率、吞吐和测距结果等细节需要在配对完成、链路连接后读取。程序会先查询 `BB_GET_STATUS` 判断目标 slot 是否可用。未指定 `-u` 时，`-Q` 会按实际查询端角色选择默认 user：AP 为 0，DEV 为 8；`-P` 仍默认 user 0。
 
 #### 3.2 标准使用方法
 
@@ -724,7 +724,7 @@ slot[0]: snr_raw=1215 snr_db=15.28 dB ldpc=0/2 gain_a=33 gain_b=37
 DEV 端：
 
 ```sh
-./l4_link_monitor -Q -u 8 -q
+./l4_link_monitor -Q -q
 ```
 
 正常输出示例：
