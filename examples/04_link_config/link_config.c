@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#define LINK_CONFIG_CMD_INTERVAL_US (200 * 1000)
 
 static void usage(const char *prog)
 {
@@ -16,7 +19,8 @@ static void usage(const char *prog)
     printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
-    printf("  -s <slot>       slot id for bandwidth/MCS, default: 0\n");
+    printf("  -s <slot>       slot id, default: 0; remote slot id for -R\n");
+    printf("  -R              set peer device by remote ioctl through -s <slot>\n");
     printf("  -B <0|1>        set BB_SET_BAND_MODE, 1=auto, 0=manual\n");
     printf("  -b <band>       set BB_SET_BAND, band: 1g/2g/5g or 0/1/2\n");
     printf("  -C <0|1>        set BB_SET_CHAN_MODE, 1=auto, 0=manual\n");
@@ -26,7 +30,7 @@ static void usage(const char *prog)
     printf("  -w <bandwidth>  set BB_SET_BANDWIDTH, 0-5: 1.25M/2.5M/5M/10M/20M/40M\n");
     printf("  -M <0|1>        set BB_SET_MCS_MODE, 1=auto, 0=manual\n");
     printf("  -m <mcs>        set BB_SET_MCS, range: 0-%d\n", BB_PHY_MCS_MAX - 1);
-    printf("  -F <0|1>        set BB_SET_FRAME_CHANGE, only valid in SINGLE_USER mode\n");
+    printf("  -F <0|1>        set BB_SET_FRAME_CHANGE, AP only and only valid in SINGLE_USER mode\n");
 }
 
 static int str_eq_ignore_case(const char *a, const char *b)
@@ -162,7 +166,67 @@ static const char *mode_name(int mode)
     }
 }
 
-static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status)
+static const char *role_name(int role)
+{
+    switch (role) {
+    case BB_ROLE_AP:
+        return "AP";
+    case BB_ROLE_DEV:
+        return "DEV";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static int link_config_ioctl(bb_dev_handle_t *handle,
+                             uint32_t request,
+                             const void *input,
+                             uint16_t input_len,
+                             void *output,
+                             uint16_t output_len,
+                             int remote_slot)
+{
+    bb_remote_ioctl_in_t remote_in;
+    bb_remote_ioctl_out_t remote_out;
+    int ret;
+
+    if (remote_slot < 0) {
+        return bb_ioctl(handle, request, input, output);
+    }
+
+    if ((input_len && !input) || input_len > sizeof(remote_in.data) ||
+        output_len > sizeof(remote_out.data)) {
+        printf("remote ioctl buffer invalid, request=0x%x in_len=%u out_len=%u\n",
+               request,
+               input_len,
+               output_len);
+        return -1;
+    }
+
+    memset(&remote_in, 0, sizeof(remote_in));
+    memset(&remote_out, 0, sizeof(remote_out));
+
+    if (input_len) {
+        memcpy(remote_in.data, input, input_len);
+    }
+
+    remote_in.len = input_len;
+    remote_in.slot = (uint8_t)remote_slot;
+    remote_in.msg_id = request;
+
+    ret = bb_ioctl(handle, BB_REMOTE_IOCTL_REQ, &remote_in, &remote_out);
+    if (ret) {
+        return ret;
+    }
+
+    if (output && output_len) {
+        memcpy(output, remote_out.data, output_len);
+    }
+
+    return 0;
+}
+
+static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status, int remote_slot)
 {
     bb_get_status_in_t input;
     int ret;
@@ -171,16 +235,43 @@ static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status)
     memset(status, 0, sizeof(*status));
 
     input.user_bmp = 0xffff;
-    ret = bb_ioctl(handle, BB_GET_STATUS, &input, status);
+    ret = link_config_ioctl(handle,
+                            BB_GET_STATUS,
+                            &input,
+                            sizeof(input),
+                            status,
+                            sizeof(*status),
+                            remote_slot);
     if (ret) {
-        printf("BB_GET_STATUS failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_STATUS remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_STATUS failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
     return 0;
 }
 
-static int set_band_mode(bb_dev_handle_t *handle, int auto_mode)
+static void print_config_title(const char *title, int remote_slot)
+{
+    if (remote_slot >= 0) {
+        printf("\n[%s remote slot=%d]\n", title, remote_slot);
+        return;
+    }
+
+    printf("\n[%s]\n", title);
+}
+
+static void delay_before_config_cmd(int executed_count)
+{
+    if (executed_count > 0) {
+        usleep(LINK_CONFIG_CMD_INTERVAL_US);
+    }
+}
+
+static int set_band_mode(bb_dev_handle_t *handle, int auto_mode, int remote_slot)
 {
     bb_set_band_mode_t input;
     int ret;
@@ -188,18 +279,24 @@ static int set_band_mode(bb_dev_handle_t *handle, int auto_mode)
     memset(&input, 0, sizeof(input));
     input.auto_mode = (uint8_t)auto_mode;
 
-    ret = bb_ioctl(handle, BB_SET_BAND_MODE, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_BAND_MODE,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_BAND_MODE failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_BAND_MODE]\n");
+    print_config_title("BB_SET_BAND_MODE", remote_slot);
     printf("auto_mode=%u\n", input.auto_mode);
     return 0;
 }
 
-static int set_band(bb_dev_handle_t *handle, int target_band)
+static int set_band(bb_dev_handle_t *handle, int target_band, int remote_slot)
 {
     bb_set_band_t input;
     int ret;
@@ -207,18 +304,24 @@ static int set_band(bb_dev_handle_t *handle, int target_band)
     memset(&input, 0, sizeof(input));
     input.target_band = (uint8_t)target_band;
 
-    ret = bb_ioctl(handle, BB_SET_BAND, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_BAND,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_BAND failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_BAND]\n");
+    print_config_title("BB_SET_BAND", remote_slot);
     printf("target_band=%s(%u)\n", band_name(input.target_band), input.target_band);
     return 0;
 }
 
-static int set_chan_mode(bb_dev_handle_t *handle, int auto_mode)
+static int set_chan_mode(bb_dev_handle_t *handle, int auto_mode, int remote_slot)
 {
     bb_set_chan_mode_t input;
     int ret;
@@ -226,18 +329,24 @@ static int set_chan_mode(bb_dev_handle_t *handle, int auto_mode)
     memset(&input, 0, sizeof(input));
     input.auto_mode = (uint8_t)auto_mode;
 
-    ret = bb_ioctl(handle, BB_SET_CHAN_MODE, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_CHAN_MODE,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_CHAN_MODE failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_CHAN_MODE]\n");
+    print_config_title("BB_SET_CHAN_MODE", remote_slot);
     printf("auto_mode=%u\n", input.auto_mode);
     return 0;
 }
 
-static int set_chan(bb_dev_handle_t *handle, int chan_dir, int chan_index)
+static int set_chan(bb_dev_handle_t *handle, int chan_dir, int chan_index, int remote_slot)
 {
     bb_set_chan_t input;
     int ret;
@@ -246,13 +355,19 @@ static int set_chan(bb_dev_handle_t *handle, int chan_dir, int chan_index)
     input.chan_dir = (uint8_t)chan_dir;
     input.chan_index = (uint8_t)chan_index;
 
-    ret = bb_ioctl(handle, BB_SET_CHAN, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_CHAN,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_CHAN failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_CHAN]\n");
+    print_config_title("BB_SET_CHAN", remote_slot);
     printf("dir=%s(%u) chan_index=%u\n",
            dir_name(input.chan_dir),
            input.chan_dir,
@@ -260,7 +375,7 @@ static int set_chan(bb_dev_handle_t *handle, int chan_dir, int chan_index)
     return 0;
 }
 
-static int set_bandwidth_mode(bb_dev_handle_t *handle, int slot, int mode)
+static int set_bandwidth_mode(bb_dev_handle_t *handle, int slot, int mode, int remote_slot)
 {
     bb_set_bandwidth_mode_t input;
     int ret;
@@ -269,18 +384,24 @@ static int set_bandwidth_mode(bb_dev_handle_t *handle, int slot, int mode)
     input.slot = (uint8_t)slot;
     input.mode = (uint8_t)mode;
 
-    ret = bb_ioctl(handle, BB_SET_BANDWIDTH_MODE, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_BANDWIDTH_MODE,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_BANDWIDTH_MODE failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_BANDWIDTH_MODE]\n");
+    print_config_title("BB_SET_BANDWIDTH_MODE", remote_slot);
     printf("slot=%u mode=%u\n", input.slot, input.mode);
     return 0;
 }
 
-static int set_bandwidth(bb_dev_handle_t *handle, int slot, int dir, int bandwidth)
+static int set_bandwidth(bb_dev_handle_t *handle, int slot, int dir, int bandwidth, int remote_slot)
 {
     bb_set_bandwidth_t input;
     int ret;
@@ -290,13 +411,19 @@ static int set_bandwidth(bb_dev_handle_t *handle, int slot, int dir, int bandwid
     input.dir = (uint8_t)dir;
     input.bandwidth = (uint8_t)bandwidth;
 
-    ret = bb_ioctl(handle, BB_SET_BANDWIDTH, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_BANDWIDTH,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_BANDWIDTH failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_BANDWIDTH]\n");
+    print_config_title("BB_SET_BANDWIDTH", remote_slot);
     printf("slot=%u dir=%s(%u) bandwidth=%s(%u)\n",
            input.slot,
            dir_name(input.dir),
@@ -306,7 +433,7 @@ static int set_bandwidth(bb_dev_handle_t *handle, int slot, int dir, int bandwid
     return 0;
 }
 
-static int set_mcs_mode(bb_dev_handle_t *handle, int slot, int auto_mode)
+static int set_mcs_mode(bb_dev_handle_t *handle, int slot, int auto_mode, int remote_slot)
 {
     bb_set_mcs_mode_t input;
     int ret;
@@ -315,20 +442,26 @@ static int set_mcs_mode(bb_dev_handle_t *handle, int slot, int auto_mode)
     input.slot = (uint8_t)slot;
     input.auto_mode = (uint8_t)auto_mode;
 
-    ret = bb_ioctl(handle, BB_SET_MCS_MODE, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_MCS_MODE,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_MCS_MODE failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_MCS_MODE]\n");
+    print_config_title("BB_SET_MCS_MODE", remote_slot);
     printf("slot=%u auto_mode=%u\n",
            input.slot,
            input.auto_mode);
     return 0;
 }
 
-static int set_mcs(bb_dev_handle_t *handle, int slot, int mcs)
+static int set_mcs(bb_dev_handle_t *handle, int slot, int mcs, int remote_slot)
 {
     bb_set_mcs_t input;
     int ret;
@@ -337,30 +470,44 @@ static int set_mcs(bb_dev_handle_t *handle, int slot, int mcs)
     input.slot = (uint8_t)slot;
     input.mcs = (uint8_t)mcs;
 
-    ret = bb_ioctl(handle, BB_SET_MCS, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_MCS,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_MCS failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_MCS]\n");
+    print_config_title("BB_SET_MCS", remote_slot);
     printf("slot=%u mcs=%u\n", input.slot, input.mcs);
     return 0;
 }
 
-static int set_frame_change(bb_dev_handle_t *handle, int mode)
+static int set_frame_change(bb_dev_handle_t *handle, int mode, int remote_slot)
 {
     bb_get_status_out_t status;
     bb_set_frame_change_t input;
     int ret;
 
-    ret = read_status(handle, &status);
+    ret = read_status(handle, &status, remote_slot);
     if (ret) {
         return ret;
     }
 
+    if (status.role != BB_ROLE_AP) {
+        print_config_title("BB_SET_FRAME_CHANGE", remote_slot);
+        printf("requires AP role, current role=%s(%u)\n",
+               role_name(status.role),
+               status.role);
+        return -1;
+    }
+
     if (status.mode != BB_MODE_SINGLE_USER) {
-        printf("\n[BB_SET_FRAME_CHANGE]\n");
+        print_config_title("BB_SET_FRAME_CHANGE", remote_slot);
         printf("requires SINGLE_USER mode, current mode=%s(%u)\n",
                mode_name(status.mode),
                status.mode);
@@ -370,13 +517,19 @@ static int set_frame_change(bb_dev_handle_t *handle, int mode)
     memset(&input, 0, sizeof(input));
     input.mode = (uint8_t)mode;
 
-    ret = bb_ioctl(handle, BB_SET_FRAME_CHANGE, &input, NULL);
+    ret = link_config_ioctl(handle,
+                            BB_SET_FRAME_CHANGE,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
     if (ret) {
         printf("BB_SET_FRAME_CHANGE failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("\n[BB_SET_FRAME_CHANGE]\n");
+    print_config_title("BB_SET_FRAME_CHANGE", remote_slot);
     printf("mode=%u\n", input.mode);
     return 0;
 }
@@ -397,6 +550,7 @@ int main(int argc, char **argv)
     int mcs_mode = 0;
     int mcs = 0;
     int frame_change_mode = 0;
+    int remote = 0;
     int do_chan_mode = 0;
     int do_chan = 0;
     int do_band_mode = 0;
@@ -406,11 +560,12 @@ int main(int argc, char **argv)
     int do_mcs_mode = 0;
     int do_mcs = 0;
     int do_frame_change = 0;
+    int executed_count = 0;
     int opt;
     int ret = 0;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:C:c:d:B:b:W:w:M:m:F:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:RC:c:d:B:b:W:w:M:m:F:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -432,6 +587,9 @@ int main(int argc, char **argv)
             if (parse_int_range(optarg, 0, BB_SLOT_MAX - 1, "slot", &slot)) {
                 return -1;
             }
+            break;
+        case 'R':
+            remote = 1;
             break;
         case 'C':
             if (parse_auto_mode(optarg, "chan auto_mode", &chan_mode)) {
@@ -512,66 +670,84 @@ int main(int argc, char **argv)
     }
 
     if (do_band_mode) {
-        ret = set_band_mode(ctx.handle, band_mode);
+        delay_before_config_cmd(executed_count);
+        ret = set_band_mode(ctx.handle, band_mode, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     if (do_band) {
-        ret = set_band(ctx.handle, target_band);
+        delay_before_config_cmd(executed_count);
+        ret = set_band(ctx.handle, target_band, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     if (do_chan_mode) {
-        ret = set_chan_mode(ctx.handle, chan_mode);
+        delay_before_config_cmd(executed_count);
+        ret = set_chan_mode(ctx.handle, chan_mode, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     if (do_chan) {
-        ret = set_chan(ctx.handle, chan_dir, chan_index);
+        delay_before_config_cmd(executed_count);
+        ret = set_chan(ctx.handle, chan_dir, chan_index, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     if (do_bandwidth_mode) {
-        ret = set_bandwidth_mode(ctx.handle, slot, bandwidth_mode);
+        delay_before_config_cmd(executed_count);
+        ret = set_bandwidth_mode(ctx.handle, slot, bandwidth_mode, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     if (do_bandwidth) {
-        ret = set_bandwidth(ctx.handle, slot, chan_dir, bandwidth);
+        delay_before_config_cmd(executed_count);
+        ret = set_bandwidth(ctx.handle, slot, chan_dir, bandwidth, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     if (do_mcs_mode) {
-        ret = set_mcs_mode(ctx.handle, slot, mcs_mode);
+        delay_before_config_cmd(executed_count);
+        ret = set_mcs_mode(ctx.handle, slot, mcs_mode, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     if (do_mcs) {
-        ret = set_mcs(ctx.handle, slot, mcs);
+        delay_before_config_cmd(executed_count);
+        ret = set_mcs(ctx.handle, slot, mcs, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     if (do_frame_change) {
-        ret = set_frame_change(ctx.handle, frame_change_mode);
+        delay_before_config_cmd(executed_count);
+        ret = set_frame_change(ctx.handle, frame_change_mode, remote ? slot : -1);
         if (ret) {
             goto done;
         }
+        ++executed_count;
     }
 
     printf("\nl4 link config finished\n");

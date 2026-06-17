@@ -2,7 +2,7 @@
 
 `l4_link_config` 用于设置图传链路的频段、信道、频宽、MCS 和帧结构配置。它和 `03_link_monitor` 配套使用：`03_link_monitor` 负责读取链路状态，`04_link_config` 负责下发链路配置。
 
-这个示例当前实现九个设置命令：
+这个示例当前实现九个设置命令，均支持通过 `-R` 封装成 `BB_REMOTE_IOCTL_REQ` 远程设置对端。`BB_SET_FRAME_CHANGE` 只能在 AP 端执行；带 `-R` 时，程序会先远程读取对端状态，确认对端是 AP 且处于 `BB_MODE_SINGLE_USER` 后再下发。
 
 | 命令字 | 作用 |
 | --- | --- |
@@ -14,7 +14,7 @@
 | `BB_SET_BANDWIDTH` | 手动设置目标频宽 |
 | `BB_SET_MCS_MODE` | 设置 MCS 自动/手动模式 |
 | `BB_SET_MCS` | 手动设置目标 MCS |
-| `BB_SET_FRAME_CHANGE` | 运行中改变帧结构，仅 SINGLE_USER 模式 |
+| `BB_SET_FRAME_CHANGE` | 运行中改变帧结构，仅 AP 端 SINGLE_USER 模式 |
 
 ## 常用命令
 
@@ -58,13 +58,21 @@
 
 这里先把 slot 0 的 MCS 模式设置为手动，再把目标 MCS 设置为 SDK 枚举值 `6`。
 
+### 远程设置对端配置
+
+```sh
+./l4_link_config -R -s 0 -B 0 -b 2g -C 0 -d rx -c 3 -W 0 -w 4 -M 0 -m 6
+```
+
+`-R` 会把设置命令封装成 `BB_REMOTE_IOCTL_REQ`，通过 `-s <slot>` 指定的链路位置发给对端设备。远程模式支持 `-B`、`-b`、`-C`、`-c`、`-W`、`-w`、`-M`、`-m`、`-F`。其中 `-F` 只能让实际执行端为 AP；如果远程对端不是 AP，程序会报错退出。
+
 ### 设置帧结构切换
 
 ```sh
 ./l4_link_config -F 1
 ```
 
-这里 `-F 1` 表示执行帧结构切换，`-F 0` 表示恢复原始帧结构。程序会先读取 `BB_GET_STATUS`，只有当前模式是 `BB_MODE_SINGLE_USER` 时才会调用 `BB_SET_FRAME_CHANGE`。
+这里 `-F 1` 表示执行帧结构切换，`-F 0` 表示恢复原始帧结构。程序会先读取 `BB_GET_STATUS`，只有实际执行端是 AP 且当前模式是 `BB_MODE_SINGLE_USER` 时才会调用 `BB_SET_FRAME_CHANGE`。
 
 ### 同时设置频段、信道、频宽和 MCS
 
@@ -72,7 +80,7 @@
 ./l4_link_config -B 0 -b 2g -C 0 -d rx -c 3 -s 0 -W 0 -w 4 -M 0 -m 6
 ```
 
-程序会按固定顺序执行：频段模式、频段、信道模式、信道、频宽模式、频宽、MCS 模式、MCS。如果指定 `-F`，会在 MCS 后执行帧结构切换。
+程序会按固定顺序执行：频段模式、频段、信道模式、信道、频宽模式、频宽、MCS 模式、MCS。如果指定 `-F`，会在 MCS 后执行帧结构切换。一次命令行包含多个配置动作时，相邻两个配置命令之间会等待 200ms。
 
 ## 参数说明
 
@@ -81,7 +89,8 @@
 | `-a <addr>` | daemon 地址，默认 `127.0.0.1` |
 | `-p <port>` | daemon 端口，默认 `BB_PORT_DEFAULT` |
 | `-i <index>` | 设备序号，默认 `0` |
-| `-s <slot>` | slot 编号，默认 `0`，用于频宽和 MCS 配置 |
+| `-s <slot>` | slot 编号，默认 `0`；用于频宽和 MCS 配置，带 `-R` 时也是远程对端 slot |
+| `-R` | 通过远程 ioctl 设置 `-s <slot>` 指定的对端；支持 `-B`、`-b`、`-C`、`-c`、`-W`、`-w`、`-M`、`-m`、`-F` |
 | `-B <0|1>` | 调用 `BB_SET_BAND_MODE`，`1` 自动，`0` 手动 |
 | `-b <band>` | 调用 `BB_SET_BAND`，支持 `1g`、`2g`、`5g` 或 `0`、`1`、`2` |
 | `-C <0|1>` | 调用 `BB_SET_CHAN_MODE`，`1` 自动，`0` 手动 |
@@ -91,10 +100,10 @@
 | `-w <bandwidth>` | 调用 `BB_SET_BANDWIDTH`，范围 `0-5` |
 | `-M <0|1>` | 调用 `BB_SET_MCS_MODE`，`1` 自动，`0` 手动 |
 | `-m <mcs>` | 调用 `BB_SET_MCS`，范围 `0-24` |
-| `-F <0|1>` | 调用 `BB_SET_FRAME_CHANGE`，`1` 执行帧结构切换，`0` 恢复原始帧结构，仅 `BB_MODE_SINGLE_USER` 支持 |
+| `-F <0|1>` | 调用 `BB_SET_FRAME_CHANGE`，`1` 执行帧结构切换，`0` 恢复原始帧结构，仅 AP 端且 `BB_MODE_SINGLE_USER` 支持；带 `-R` 时检查远端角色和模式 |
 | `-h` | 打印帮助信息 |
 
-如果没有指定任何设置动作，程序只打印帮助并返回错误，避免误操作。
+如果没有指定任何设置动作，程序只打印帮助并返回错误，避免误操作。`-R` 远程模式会复用 `-s <slot>` 选择对端链路位置；对 `-F`，程序会额外检查实际执行端必须为 AP。
 
 ## 输出日志格式
 
@@ -108,7 +117,7 @@ auto_mode=0
 target_band=5G(2)
 ```
 
-任意一步 `bb_ioctl()` 返回非 0 时，程序会打印 `BB_SET_xxx failed, ret=<ret>`，停止后续设置，关闭连接并返回错误。
+任意一步 `bb_ioctl()` 返回非 0 时，程序会打印 `BB_SET_xxx failed, ret=<ret>`，停止后续设置，关闭连接并返回错误。一次执行多个配置动作时，只有前一个配置动作成功后才会在下一个配置动作前等待 200ms；带 `-R` 时同样生效，成功标题会显示 `remote slot=<slot>`。
 
 ## 参数和结构体字段的对应关系
 
@@ -244,13 +253,15 @@ bb_get_status_in_t status_input;
 bb_get_status_out_t status;
 bb_set_frame_change_t input;
 
-bb_ioctl(handle, BB_GET_STATUS, &status_input, &status);
-if (status.mode != BB_MODE_SINGLE_USER) {
+link_config_ioctl(handle, BB_GET_STATUS, &status_input, sizeof(status_input),
+                  &status, sizeof(status), remote_slot);
+if (status.role != BB_ROLE_AP || status.mode != BB_MODE_SINGLE_USER) {
     return -1;
 }
 
 input.mode = mode;
-bb_ioctl(handle, BB_SET_FRAME_CHANGE, &input, NULL);
+link_config_ioctl(handle, BB_SET_FRAME_CHANGE, &input, sizeof(input),
+                  NULL, 0, remote_slot);
 ```
 
 | 参数 | 字段 | 含义 |
@@ -258,7 +269,7 @@ bb_ioctl(handle, BB_SET_FRAME_CHANGE, &input, NULL);
 | `-F 1` | `mode = 1` | 执行帧结构切换 |
 | `-F 0` | `mode = 0` | 恢复原始帧结构 |
 
-`BB_SET_FRAME_CHANGE` 仅支持 `BB_MODE_SINGLE_USER`。示例程序会在调用前读取 `BB_GET_STATUS`，如果当前模式不是 `SINGLE_USER`，会直接报错退出，不下发 `BB_SET_FRAME_CHANGE`。
+`BB_SET_FRAME_CHANGE` 仅支持 AP 端的 `BB_MODE_SINGLE_USER`。示例程序会在调用前读取 `BB_GET_STATUS`；带 `-R` 时读取远端状态。如果实际执行端不是 AP，或模式不是 `SINGLE_USER`，会直接报错退出，不下发 `BB_SET_FRAME_CHANGE`。
 
 ## 执行流程
 
@@ -293,12 +304,12 @@ BB_SET_MCS_MODE
     |
 BB_SET_MCS
     |
-BB_SET_FRAME_CHANGE（仅指定 -F 时，且必须是 SINGLE_USER 模式）
+BB_SET_FRAME_CHANGE（仅指定 -F 时，且实际执行端必须是 AP + SINGLE_USER；支持 -R）
     |
 关闭设备连接
 ```
 
-任意一步 `bb_ioctl()` 返回非 0 时，程序会停止后续设置，关闭连接并返回错误。
+任意一步 `bb_ioctl()` 返回非 0 时，程序会停止后续设置，关闭连接并返回错误。相邻两个实际配置命令之间固定等待 200ms；带 `-R` 时，支持的命令会通过 `BB_REMOTE_IOCTL_REQ` 下发到 `-s <slot>` 指定的对端。
 
 ## 和 `03_link_monitor` 配合使用
 
@@ -320,14 +331,25 @@ BB_SET_FRAME_CHANGE（仅指定 -F 时，且必须是 SINGLE_USER 模式）
 
 如果只执行 `-w 4`，程序只调用 `BB_SET_BANDWIDTH`，不会自动调用 `BB_SET_BANDWIDTH_MODE 0`。需要手动模式时，请显式写成 `-W 0 -w 4`。
 
+### 固定频点配置的控制关系
+
+固定频点流程：
+固定AP频点：首先配置AP的频段模式为手动，然后设置AP的频段到2G/5G,然后设置信道模式为手动，设置信道。
+固定DEV频点，也是首先配置AP的频段模式为手动。然后设置DEV的频段到2G/5G,然后设置信道模式为手动，设置信道。
+
+命令流程：
+在AP端固定AP频点到2400: l4_link_config -B 0 -b 1 -C 0 -c 0
+
+在AP端固定DEV频点到2400： l4_link_config -B 0、l4_link_config -b 1 -C 0 -c 0 -R
+
 ### `-d` 同时服务信道和频宽
 
 `-d` 会用于 `BB_SET_CHAN` 的 `chan_dir`，也会用于 `BB_SET_BANDWIDTH` 的 `dir`。如果同一条命令里同时设置 `-c` 和 `-w`，二者会使用同一个方向。
 
-### 示例程序不会自动下发远端配置
+### `-R` 是远程 ioctl，不是 `BB_SET_REMOTE`
 
-这个示例只实现列出的九个 `BB_SET_*` 命令。它不会额外调用 `BB_SET_REMOTE`。
+`-R` 会把 `BB_SET_*` 命令封装成 `BB_REMOTE_IOCTL_REQ` 发给对端执行。它不会额外调用 `BB_SET_REMOTE`。`-W`、`-w`、`-F` 也走同一条远程 ioctl 路径；其中 `-F` 会先确认实际执行端是 AP。
 
 ## 一句话总结
 
-`l4_link_config` 做的事情就是：连接 daemon，打开指定 8030 设备，然后按参数下发频段、信道、频宽、MCS 和帧结构相关配置。
+`l4_link_config` 做的事情就是：连接 daemon，打开指定 8030 设备，然后按参数下发频段、信道、频宽、MCS 和帧结构相关配置；带 `-R` 时，配置会远程下发给 `-s <slot>` 指定的对端，其中 `-F` 只允许实际执行端为 AP。
