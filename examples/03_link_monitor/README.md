@@ -44,7 +44,7 @@
 ./l4_link_monitor -C -R -s 0
 ```
 
-通过 slot 0 远程查询对端设备的信道信息。不带 `-R` 时，`-C` 仍查询本机信道信息。
+通过 slot 0 远程查询对端设备的信道信息；也可以和 `-S/-Q/-q/-M/-P/-C/-B/-T/-D/-V` 任意组合。不带 `-R` 时仍查询本机信息。
 
 ```sh
 ./l4_link_monitor -V
@@ -68,7 +68,7 @@
 | `-M` | 查询 `BB_GET_MCS` |
 | `-P` | 查询 `BB_GET_CUR_POWER` |
 | `-C` | 查询 `BB_GET_CHAN_INFO` |
-| `-R` | 配合 `-C` 查询 `-s <slot>` 指定的对端信道信息 |
+| `-R` | 通过远程 ioctl 查询 `-s <slot>` 指定的对端；支持 `-A/-S/-Q/-q/-M/-P/-C/-B/-T/-D/-V` |
 | `-B` | 查询 `BB_GET_BAND_INFO` |
 | `-T` | 查询 `BB_GET_THROUGHPUT` |
 | `-D` | 查询 `BB_GET_DISTC_RESULT` |
@@ -93,9 +93,9 @@
 
 ## 读取前置条件
 
-`BB_GET_USER_QUALITY`、`BB_GET_PEER_QUALITY`、`BB_GET_MCS`、`BB_GET_CUR_POWER`、`BB_GET_THROUGHPUT`、`BB_GET_DISTC_RESULT` 这些链路细节只有在图传已经对频/连接后才读取。程序会先读取 `BB_GET_STATUS`，确认指定 slot 满足 `pair_state=1` 或 `state=CONNECT`；如果不满足，会打印当前状态并跳过链路细节查询。
+`BB_GET_USER_QUALITY`、`BB_GET_PEER_QUALITY`、`BB_GET_MCS`、`BB_GET_CUR_POWER`、`BB_GET_THROUGHPUT`、`BB_GET_DISTC_RESULT` 这些链路细节只有在图传已经对频/连接后才读取。程序会先读取实际查询端的 `BB_GET_STATUS`，带 `-R` 时读取远端状态；确认指定 slot 满足 `pair_state=1` 或 `state=CONNECT` 后才继续，否则会打印当前状态并跳过链路细节查询。
 
-`BB_GET_STATUS`、`BB_GET_CHAN_INFO`、`BB_GET_BAND_INFO` 和 `BB_GET_1V1_INFO` 可作为基础状态信息单独读取。
+`BB_GET_STATUS`、`BB_GET_CHAN_INFO`、`BB_GET_BAND_INFO` 和 `BB_GET_1V1_INFO` 可作为基础状态信息单独读取，带 `-R` 时同样会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行。
 
 ## 数值换算
 
@@ -111,3 +111,7 @@
 AP 侧通常用 `-s <slot>` 指定要查看哪个 DEV 所在的 slot。DEV 侧使用 `-s 0` 查看 AP 方向，因为 SDK 中 `BB_SLOT_AP` 等于 0。
 
 `-u <user>` 用于 `BB_GET_USER_QUALITY` 和 `BB_GET_CUR_POWER`。默认 user 0，只有需要看其它物理用户时才需要修改。
+
+## 远程查询
+
+`-R` 会把查询命令封装成 `BB_REMOTE_IOCTL_REQ`，由 `-s <slot>` 指定的对端执行。远程查询支持 `-A` 和所有单项查询参数，包括 `-S`、`-Q`、`-q`、`-M`、`-P`、`-C`、`-B`、`-T`、`-D`、`-V`。输出标题会显示 `remote slot=<slot>`，例如 `[BB_GET_STATUS remote slot=0]`。

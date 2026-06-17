@@ -277,7 +277,7 @@ static void usage(const char *prog)
     printf("  -M              query BB_GET_MCS for TX and RX\n");
     printf("  -P              query BB_GET_CUR_POWER\n");
     printf("  -C              query BB_GET_CHAN_INFO\n");
-    printf("  -R              query remote slot for -C, default: local\n");
+    printf("  -R              query peer device by remote ioctl through -s <slot>\n");
     printf("  -B              query BB_GET_BAND_INFO\n");
     printf("  -T              query BB_GET_THROUGHPUT for TX and RX\n");
     printf("  -D              query BB_GET_DISTC_RESULT\n");
@@ -332,7 +332,17 @@ static int link_monitor_ioctl(bb_dev_handle_t *handle,
     return 0;
 }
 
-static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status)
+static void print_query_title(const char *title, int remote_slot)
+{
+    if (remote_slot >= 0) {
+        printf("\n[%s remote slot=%d]\n", title, remote_slot);
+        return;
+    }
+
+    printf("\n[%s]\n", title);
+}
+
+static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status, int remote_slot)
 {
     bb_get_status_in_t input;
     int ret;
@@ -341,18 +351,28 @@ static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status)
     memset(status, 0, sizeof(*status));
 
     input.user_bmp = 0xffff;
-    ret = bb_ioctl(handle, BB_GET_STATUS, &input, status);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_STATUS,
+                             &input,
+                             sizeof(input),
+                             status,
+                             sizeof(*status),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_STATUS failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_STATUS remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_STATUS failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
     return 0;
 }
 
-static void print_status(const bb_get_status_out_t *status)
+static void print_status(const bb_get_status_out_t *status, int remote_slot)
 {
-    printf("\n[BB_GET_STATUS]\n");
+    print_query_title("BB_GET_STATUS", remote_slot);
     printf("role        : %s (%u)\n", role_name(status->role), status->role);
     printf("mode        : %s (%u)\n", mode_name(status->mode), status->mode);
     printf("sync_mode   : %u\n", status->sync_mode);
@@ -386,17 +406,17 @@ static void print_status(const bb_get_status_out_t *status)
     print_user_phy_status(status);
 }
 
-static int query_status(bb_dev_handle_t *handle)
+static int query_status(bb_dev_handle_t *handle, int remote_slot)
 {
     bb_get_status_out_t status;
     int ret;
 
-    ret = read_status(handle, &status);
+    ret = read_status(handle, &status, remote_slot);
     if (ret) {
         return ret;
     }
 
-    print_status(&status);
+    print_status(&status, remote_slot);
     return 0;
 }
 
@@ -412,7 +432,7 @@ static int link_ready_for_slot(const bb_get_status_out_t *status, int slot)
     return link->pair_state || link->state == BB_LINK_STATE_CONNECT;
 }
 
-static int query_user_quality(bb_dev_handle_t *handle, int user)
+static int query_user_quality(bb_dev_handle_t *handle, int user, int remote_slot)
 {
     bb_get_user_quality_in_t input;
     bb_get_user_quality_out_t output;
@@ -424,19 +444,29 @@ static int query_user_quality(bb_dev_handle_t *handle, int user)
 
     input.user_bmp = (uint16_t)(1u << user);
     input.average = 0;
-    ret = bb_ioctl(handle, BB_GET_USER_QUALITY, &input, &output);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_USER_QUALITY,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_USER_QUALITY failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_USER_QUALITY remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_USER_QUALITY failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_USER_QUALITY]\n");
+    print_query_title("BB_GET_USER_QUALITY", remote_slot);
     snprintf(prefix, sizeof(prefix), "user[%d]:", user);
     print_quality(prefix, &output.qualities[user]);
     return 0;
 }
 
-static int query_peer_quality(bb_dev_handle_t *handle, int slot)
+static int query_peer_quality(bb_dev_handle_t *handle, int slot, int remote_slot)
 {
     bb_get_peer_quality_in_t input;
     bb_get_peer_quality_out_t output;
@@ -448,19 +478,29 @@ static int query_peer_quality(bb_dev_handle_t *handle, int slot)
 
     input.slot_bmp = (uint8_t)(1u << slot);
     input.arverage = 0;
-    ret = bb_ioctl(handle, BB_GET_PEER_QUALITY, &input, &output);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_PEER_QUALITY,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_PEER_QUALITY failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_PEER_QUALITY remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_PEER_QUALITY failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_PEER_QUALITY]\n");
+    print_query_title("BB_GET_PEER_QUALITY", remote_slot);
     snprintf(prefix, sizeof(prefix), "slot[%d]:", slot);
     print_quality(prefix, &output.qualities[slot]);
     return 0;
 }
 
-static int query_mcs_dir(bb_dev_handle_t *handle, int slot, uint8_t dir)
+static int query_mcs_dir(bb_dev_handle_t *handle, int slot, uint8_t dir, int remote_slot)
 {
     bb_get_mcs_in_t input;
     bb_get_mcs_out_t output;
@@ -471,9 +511,19 @@ static int query_mcs_dir(bb_dev_handle_t *handle, int slot, uint8_t dir)
 
     input.slot = (uint8_t)slot;
     input.dir = dir;
-    ret = bb_ioctl(handle, BB_GET_MCS, &input, &output);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_MCS,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_MCS %s failed, ret=%d\n", dir_name(dir), ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_MCS %s remote slot=%d failed, ret=%d\n", dir_name(dir), remote_slot, ret);
+        } else {
+            printf("BB_GET_MCS %s failed, ret=%d\n", dir_name(dir), ret);
+        }
         return ret;
     }
 
@@ -485,20 +535,21 @@ static int query_mcs_dir(bb_dev_handle_t *handle, int slot, uint8_t dir)
     return 0;
 }
 
-static int query_mcs(bb_dev_handle_t *handle, int slot)
+static int query_mcs(bb_dev_handle_t *handle, int slot, int remote_slot)
 {
     int ret;
 
-    printf("\n[BB_GET_MCS] slot=%d\n", slot);
-    ret = query_mcs_dir(handle, slot, BB_DIR_TX);
+    print_query_title("BB_GET_MCS", remote_slot);
+    printf("slot=%d\n", slot);
+    ret = query_mcs_dir(handle, slot, BB_DIR_TX, remote_slot);
     if (ret) {
         return ret;
     }
 
-    return query_mcs_dir(handle, slot, BB_DIR_RX);
+    return query_mcs_dir(handle, slot, BB_DIR_RX, remote_slot);
 }
 
-static int query_cur_power(bb_dev_handle_t *handle, int user)
+static int query_cur_power(bb_dev_handle_t *handle, int user, int remote_slot)
 {
     bb_get_cur_pwr_in_t input;
     bb_get_cur_pwr_out_t output;
@@ -508,13 +559,23 @@ static int query_cur_power(bb_dev_handle_t *handle, int user)
     memset(&output, 0, sizeof(output));
 
     input.usr = (uint8_t)user;
-    ret = bb_ioctl(handle, BB_GET_CUR_POWER, &input, &output);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_CUR_POWER,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_CUR_POWER failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_CUR_POWER remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_CUR_POWER failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_CUR_POWER]\n");
+    print_query_title("BB_GET_CUR_POWER", remote_slot);
     printf("user[%u]: power=%u\n", output.usr, output.pwr);
     return 0;
 }
@@ -543,12 +604,7 @@ static int query_chan_info(bb_dev_handle_t *handle, int remote_slot)
         return ret;
     }
 
-    if (remote_slot >= 0) {
-        printf("\n[BB_GET_CHAN_INFO remote slot=%d]\n", remote_slot);
-    }
-    else {
-        printf("\n[BB_GET_CHAN_INFO local]\n");
-    }
+    print_query_title("BB_GET_CHAN_INFO", remote_slot);
     printf("chan_num=%u auto_mode=%u acs_chan=%u work_chan=%u\n",
            output.chan_num,
            output.auto_mode,
@@ -567,7 +623,7 @@ static int query_chan_info(bb_dev_handle_t *handle, int remote_slot)
     return 0;
 }
 
-static int query_band_info(bb_dev_handle_t *handle)
+static int query_band_info(bb_dev_handle_t *handle, int remote_slot)
 {
     bb_get_band_info_in_t input;
     bb_get_band_info_out_t output;
@@ -576,13 +632,23 @@ static int query_band_info(bb_dev_handle_t *handle)
     memset(&input, 0, sizeof(input));
     memset(&output, 0, sizeof(output));
 
-    ret = bb_ioctl(handle, BB_GET_BAND_INFO, &input, &output);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_BAND_INFO,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_BAND_INFO failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_BAND_INFO remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_BAND_INFO failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_BAND_INFO]\n");
+    print_query_title("BB_GET_BAND_INFO", remote_slot);
     printf("band_mode=%s(%u) work_band=%s(%u)\n",
            band_mode_name(output.band_mode),
            output.band_mode,
@@ -591,7 +657,7 @@ static int query_band_info(bb_dev_handle_t *handle)
     return 0;
 }
 
-static int query_throughput(bb_dev_handle_t *handle, int slot)
+static int query_throughput(bb_dev_handle_t *handle, int slot, int remote_slot)
 {
     bb_get_throughput_in_t input;
     bb_get_throughput_out_t output;
@@ -602,13 +668,24 @@ static int query_throughput(bb_dev_handle_t *handle, int slot)
 
     input.slot = (uint8_t)slot;
     input.dir_bmp = (uint8_t)((1u << BB_DIR_TX) | (1u << BB_DIR_RX));
-    ret = bb_ioctl(handle, BB_GET_THROUGHPUT, &input, &output);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_THROUGHPUT,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_THROUGHPUT failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_THROUGHPUT remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_THROUGHPUT failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_THROUGHPUT] slot=%d\n", slot);
+    print_query_title("BB_GET_THROUGHPUT", remote_slot);
+    printf("slot=%d\n", slot);
     for (int dir = 0; dir < BB_DIR_MAX; ++dir) {
         if ((input.dir_bmp & (1u << dir)) == 0) {
             continue;
@@ -622,7 +699,7 @@ static int query_throughput(bb_dev_handle_t *handle, int slot)
     return 0;
 }
 
-static int query_distc_result(bb_dev_handle_t *handle, int slot)
+static int query_distc_result(bb_dev_handle_t *handle, int slot, int remote_slot)
 {
     bb_get_distc_result_in_t input;
     bb_get_distc_result_out_t output;
@@ -632,18 +709,29 @@ static int query_distc_result(bb_dev_handle_t *handle, int slot)
     memset(&output, 0, sizeof(output));
 
     input.slot_bmp = (uint8_t)(1u << slot);
-    ret = bb_ioctl(handle, BB_GET_DISTC_RESULT, &input, &output);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_DISTC_RESULT,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_DISTC_RESULT failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_DISTC_RESULT remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_DISTC_RESULT failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_DISTC_RESULT] slot=%d\n", slot);
+    print_query_title("BB_GET_DISTC_RESULT", remote_slot);
+    printf("slot=%d\n", slot);
     printf("  slot[%d]: distance=%d\n", slot, output.distance[slot]);
     return 0;
 }
 
-static int query_1v1_info(bb_dev_handle_t *handle)
+static int query_1v1_info(bb_dev_handle_t *handle, int remote_slot)
 {
     bb_get_1v1_info_in_t input;
     bb_get_1v1_info_out_t output;
@@ -653,13 +741,23 @@ static int query_1v1_info(bb_dev_handle_t *handle)
     memset(&output, 0, sizeof(output));
 
     input.frame_num = 0;
-    ret = bb_ioctl(handle, BB_GET_1V1_INFO, &input, &output);
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_1V1_INFO,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
     if (ret) {
-        printf("BB_GET_1V1_INFO failed, ret=%d\n", ret);
+        if (remote_slot >= 0) {
+            printf("BB_GET_1V1_INFO remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_1V1_INFO failed, ret=%d\n", ret);
+        }
         return ret;
     }
 
-    printf("\n[BB_GET_1V1_INFO]\n");
+    print_query_title("BB_GET_1V1_INFO", remote_slot);
     print_1v1_info("self", &output.self);
     print_1v1_info("peer", &output.peer);
     return 0;
@@ -682,7 +780,7 @@ int main(int argc, char **argv)
     int do_throughput = 0;
     int do_distc_result = 0;
     int do_1v1_info = 0;
-    int remote_chan = 0;
+    int remote = 0;
     int opt;
     int ret = 0;
     int need_link_detail;
@@ -741,7 +839,7 @@ int main(int argc, char **argv)
             do_chan = 1;
             break;
         case 'R':
-            remote_chan = 1;
+            remote = 1;
             break;
         case 'B':
             do_band = 1;
@@ -794,20 +892,20 @@ int main(int argc, char **argv)
     need_link_detail = do_user_quality || do_peer_quality || do_mcs || do_power ||
                        do_throughput || do_distc_result;
     if (do_status || need_link_detail) {
-        ret = read_status(ctx.handle, &status);
+        ret = read_status(ctx.handle, &status, remote ? slot : -1);
         if (ret) {
             goto done;
         }
 
         if (do_status) {
-            print_status(&status);
+            print_status(&status, remote ? slot : -1);
         }
 
         if (need_link_detail) {
             link_ready = link_ready_for_slot(&status, slot);
             if (!link_ready) {
                 if (!do_status) {
-                    print_status(&status);
+                    print_status(&status, remote ? slot : -1);
                 }
 
                 printf("\nslot[%d] is not paired/connected, skip link detail queries\n", slot);
@@ -817,63 +915,63 @@ int main(int argc, char **argv)
     }
 
     if (do_user_quality && link_ready) {
-        ret = query_user_quality(ctx.handle, user);
+        ret = query_user_quality(ctx.handle, user, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_peer_quality && link_ready) {
-        ret = query_peer_quality(ctx.handle, slot);
+        ret = query_peer_quality(ctx.handle, slot, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_mcs && link_ready) {
-        ret = query_mcs(ctx.handle, slot);
+        ret = query_mcs(ctx.handle, slot, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_power && link_ready) {
-        ret = query_cur_power(ctx.handle, user);
+        ret = query_cur_power(ctx.handle, user, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_chan) {
-        ret = query_chan_info(ctx.handle, remote_chan ? slot : -1);
+        ret = query_chan_info(ctx.handle, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_band) {
-        ret = query_band_info(ctx.handle);
+        ret = query_band_info(ctx.handle, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_throughput && link_ready) {
-        ret = query_throughput(ctx.handle, slot);
+        ret = query_throughput(ctx.handle, slot, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_distc_result && link_ready) {
-        ret = query_distc_result(ctx.handle, slot);
+        ret = query_distc_result(ctx.handle, slot, remote ? slot : -1);
         if (ret) {
             goto done;
         }
     }
 
     if (do_1v1_info) {
-        ret = query_1v1_info(ctx.handle);
+        ret = query_1v1_info(ctx.handle, remote ? slot : -1);
         if (ret) {
             goto done;
         }

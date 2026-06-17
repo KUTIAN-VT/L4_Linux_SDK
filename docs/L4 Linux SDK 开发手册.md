@@ -661,7 +661,7 @@ DEV 侧手动设置 AP MAC：
 | `-M`        | 查询 `BB_GET_MCS`            | 无    |
 | `-P`        | 查询 `BB_GET_CUR_POWER`      | 无    |
 | `-C`        | 查询 `BB_GET_CHAN_INFO`      | 无    |
-| `-R`        | 配合 `-C` 查询对端 slot 的信道信息 | 无    |
+| `-R`        | 通过远程 ioctl 查询 `-s <slot>` 指定的对端，支持全量和单项查询 | 无    |
 | `-B`        | 查询 `BB_GET_BAND_INFO`      | 无    |
 | `-T`        | 查询 `BB_GET_THROUGHPUT`     | 无    |
 | `-D`        | 查询 `BB_GET_DISTC_RESULT`   | 无    |
@@ -679,7 +679,7 @@ DEV 侧手动设置 AP MAC：
 3. 执行 `l4_link_monitor` 查询全量链路信息。
 4. 根据需要通过 `-S/-Q/-M/-T/-V` 等参数查询指定信息。
 5. AP 侧通过 `-s` 指定目标 DEV 所在 slot；DEV 侧通常使用 `-s 0` 查看 AP 方向。
-6. `-C` 默认查询本机信道信息；AP 侧需要查询 DEV 信道信息时，使用 `-C -R -s <slot>`。
+6. 默认查询本机信息；需要查询对端时增加 `-R -s <slot>`，可配合 `-A/-S/-Q/-q/-M/-P/-C/-B/-T/-D/-V` 使用。
 
 #### 3.3 示例
 
@@ -790,7 +790,7 @@ user[0]: power=15
 正常输出示例：
 
 ```text
-[BB_GET_CHAN_INFO local]
+[BB_GET_CHAN_INFO]
 chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
   chan[0]: freq=2400000 KHz power=-92 dbm
   chan[1]: freq=2411000 KHz power=-79 dbm
@@ -826,7 +826,7 @@ chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
   chan[31]: freq=5840000 KHz power=-100 dbm
 ```
 
-查询对端信道信息时，增加 `-R`，并通过 `-s <slot>` 指定对端所在 slot。例如 AP 侧查询 slot 0 的 DEV 信道信息：
+查询对端信息时，增加 `-R`，并通过 `-s <slot>` 指定对端所在 slot。例如 AP 侧查询 slot 0 的 DEV 信道信息：
 
 ```sh
 ./l4_link_monitor -C -R -s 0
@@ -841,7 +841,7 @@ chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
   ...
 ```
 
-`-R` 会将 `BB_GET_CHAN_INFO` 封装进 `BB_REMOTE_IOCTL_REQ`，由 `-s` 指定的对端 slot 执行查询。不带 `-R` 时，`-C` 仍查询本机信道信息。
+`-R` 会将查询命令封装进 `BB_REMOTE_IOCTL_REQ`，由 `-s` 指定的对端 slot 执行查询。不带 `-R` 时仍查询本机信息。`-R` 支持 `-A` 和所有单项查询参数，包括 `-S`、`-Q`、`-q`、`-M`、`-P`、`-C`、`-B`、`-T`、`-D`、`-V`。链路细节查询会先读取实际查询端的 `BB_GET_STATUS` 做 pair/connect 检查。
 
 ##### 3.3.7 查询频段信息
 
@@ -865,7 +865,8 @@ band_mode=AUTO(1) work_band=5G(2)
 正常输出示例：
 
 ```text
-[BB_GET_THROUGHPUT] slot=0
+[BB_GET_THROUGHPUT]
+slot=0
   TX: phy=232960 real=26112
   RX: phy=11471040 real=53664
 ```
@@ -879,7 +880,8 @@ band_mode=AUTO(1) work_band=5G(2)
 正常输出示例：
 
 ```text
-[BB_GET_DISTC_RESULT] slot=0
+[BB_GET_DISTC_RESULT]
+slot=0
   slot[0]: distance=123
 ```
 
