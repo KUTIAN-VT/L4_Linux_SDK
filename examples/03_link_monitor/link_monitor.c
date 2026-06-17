@@ -269,7 +269,7 @@ static void usage(const char *prog)
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
     printf("  -s <slot>       slot id, default: 0; DEV uses slot 0 as AP\n");
-    printf("  -u <user>       physical user id for -Q/-P; -Q default: AP=0, DEV=8\n");
+    printf("  -u <user>       physical user id; -Q default: AP=0, DEV=8; -P default: AP=8, DEV=0\n");
     printf("  -A              query all link information, default action\n");
     printf("  -S              query BB_GET_STATUS\n");
     printf("  -Q              query BB_GET_USER_QUALITY\n");
@@ -439,6 +439,18 @@ static int default_quality_user_for_role(uint8_t role)
         return BB_USER_0;
     case BB_ROLE_DEV:
         return BB_USER_BR_CS;
+    default:
+        return BB_USER_0;
+    }
+}
+
+static int default_power_user_for_role(uint8_t role)
+{
+    switch (role) {
+    case BB_ROLE_AP:
+        return BB_USER_BR_CS;
+    case BB_ROLE_DEV:
+        return BB_USER_0;
     default:
         return BB_USER_0;
     }
@@ -951,7 +963,8 @@ int main(int argc, char **argv)
     }
 
     if (do_power && link_ready) {
-        ret = query_cur_power(ctx.handle, user, remote ? slot : -1);
+        int power_user = user_specified ? user : default_power_user_for_role(status.role);
+        ret = query_cur_power(ctx.handle, power_user, remote ? slot : -1);
         if (ret) {
             goto done;
         }

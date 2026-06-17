@@ -32,7 +32,7 @@
 ./l4_link_monitor -u 0 -Q -P
 ```
 
-查询 user 0 的当前发射功率；`-Q` 的默认 user 会按实际查询端角色选择，AP 为 0，DEV 为 8。
+查询用户质量和当前发射功率；未指定 `-u` 时，`-Q` 默认 AP=0、DEV=8，`-P` 默认 AP=8、DEV=0。
 
 ```sh
 ./l4_link_monitor -B
@@ -60,7 +60,7 @@
 | `-p <port>` | daemon 端口 |
 | `-i <index>` | 设备序号，默认 `0` |
 | `-s <slot>` | 目标 slot，默认 `0`；DEV 侧 slot 0 表示 AP |
-| `-u <user>` | 指定 `-Q`/`-P` 的物理用户；未指定时 `-Q` 按角色默认 AP=0、DEV=8，`-P` 默认 0 |
+| `-u <user>` | 指定 `-Q`/`-P` 的物理用户；未指定时 `-Q` 默认 AP=0、DEV=8，`-P` 默认 AP=8、DEV=0 |
 | `-A` | 查询全部链路信息 |
 | `-S` | 查询 `BB_GET_STATUS` |
 | `-Q` | 查询 `BB_GET_USER_QUALITY` |
@@ -110,7 +110,7 @@
 
 AP 侧通常用 `-s <slot>` 指定要查看哪个 DEV 所在的 slot。DEV 侧使用 `-s 0` 查看 AP 方向，因为 SDK 中 `BB_SLOT_AP` 等于 0。
 
-`-u <user>` 用于覆盖 `BB_GET_USER_QUALITY` 和 `BB_GET_CUR_POWER` 的物理用户。未指定 `-u` 时，`-Q` 会先读取实际查询端角色：AP 默认 user 0，DEV 默认 user 8；`-P` 仍默认 user 0。
+`-u <user>` 用于覆盖 `BB_GET_USER_QUALITY` 和 `BB_GET_CUR_POWER` 的物理用户。未指定 `-u` 时，程序会先读取实际查询端角色：`-Q` 在 AP 默认 user 0、DEV 默认 user 8；`-P` 在 AP 默认 user 8、DEV 默认 user 0。
 
 ## 远程查询
 
