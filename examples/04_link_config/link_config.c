@@ -20,6 +20,9 @@ static void usage(const char *prog)
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
     printf("  -s <slot>       slot id, default: 0; remote slot id for -R\n");
+    printf("  -u <user>       physical user id for -P, default: AP=%d, DEV=%d\n",
+           BB_USER_BR_CS,
+           BB_USER_0);
     printf("  -R              set peer device by remote ioctl through -s <slot>\n");
     printf("  -B <0|1>        set BB_SET_BAND_MODE, 1=auto, 0=manual\n");
     printf("  -b <band>       set BB_SET_BAND, band: 1g/2g/5g or 0/1/2\n");
@@ -30,6 +33,8 @@ static void usage(const char *prog)
     printf("  -w <bandwidth>  set BB_SET_BANDWIDTH, 0-5: 1.25M/2.5M/5M/10M/20M/40M\n");
     printf("  -M <0|1>        set BB_SET_MCS_MODE, 1=auto, 0=manual\n");
     printf("  -m <mcs>        set BB_SET_MCS, range: 0-%d\n", BB_PHY_MCS_MAX - 1);
+    printf("  -O <0|1>        set BB_SET_POWER_AUTO, 1=auto, 0=manual\n");
+    printf("  -P <power>      set BB_SET_POWER, range: 0-31 dBm\n");
     printf("  -F <0|1>        set BB_SET_FRAME_CHANGE, AP only and only valid in SINGLE_USER mode\n");
 }
 
@@ -175,6 +180,18 @@ static const char *role_name(int role)
         return "DEV";
     default:
         return "UNKNOWN";
+    }
+}
+
+static int default_power_user_for_role(uint8_t role)
+{
+    switch (role) {
+    case BB_ROLE_AP:
+        return BB_USER_BR_CS;
+    case BB_ROLE_DEV:
+        return BB_USER_0;
+    default:
+        return BB_USER_0;
     }
 }
 
@@ -487,6 +504,71 @@ static int set_mcs(bb_dev_handle_t *handle, int slot, int mcs, int remote_slot)
     return 0;
 }
 
+static int resolve_power_user(bb_dev_handle_t *handle, int remote_slot, int *user)
+{
+    bb_get_status_out_t status;
+    int ret;
+
+    ret = read_status(handle, &status, remote_slot);
+    if (ret) {
+        return ret;
+    }
+
+    *user = default_power_user_for_role(status.role);
+    return 0;
+}
+
+static int set_power_auto(bb_dev_handle_t *handle, int pwr_auto, int remote_slot)
+{
+    bb_set_pwr_auto_in_t input;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    input.pwr_auto = (uint8_t)pwr_auto;
+
+    ret = link_config_ioctl(handle,
+                            BB_SET_POWER_AUTO,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
+    if (ret) {
+        printf("BB_SET_POWER_AUTO failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    print_config_title("BB_SET_POWER_AUTO", remote_slot);
+    printf("pwr_auto=%u\n", input.pwr_auto);
+    return 0;
+}
+
+static int set_power(bb_dev_handle_t *handle, int user, int power, int remote_slot)
+{
+    bb_set_pwr_in_t input;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    input.usr = (uint8_t)user;
+    input.pwr = (uint8_t)power;
+
+    ret = link_config_ioctl(handle,
+                            BB_SET_POWER,
+                            &input,
+                            sizeof(input),
+                            NULL,
+                            0,
+                            remote_slot);
+    if (ret) {
+        printf("BB_SET_POWER failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    print_config_title("BB_SET_POWER", remote_slot);
+    printf("user=%u power=%u dBm\n", input.usr, input.pwr);
+    return 0;
+}
+
 static int set_frame_change(bb_dev_handle_t *handle, int mode, int remote_slot)
 {
     bb_get_status_out_t status;
@@ -549,8 +631,12 @@ int main(int argc, char **argv)
     int bandwidth = 0;
     int mcs_mode = 0;
     int mcs = 0;
+    int power_user = 0;
+    int power_auto = 0;
+    int power = 0;
     int frame_change_mode = 0;
     int remote = 0;
+    int power_user_specified = 0;
     int do_chan_mode = 0;
     int do_chan = 0;
     int do_band_mode = 0;
@@ -559,13 +645,15 @@ int main(int argc, char **argv)
     int do_bandwidth = 0;
     int do_mcs_mode = 0;
     int do_mcs = 0;
+    int do_power_auto = 0;
+    int do_power = 0;
     int do_frame_change = 0;
     int executed_count = 0;
     int opt;
     int ret = 0;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:RC:c:d:B:b:W:w:M:m:F:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:u:RC:c:d:B:b:W:w:M:m:O:P:F:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -587,6 +675,12 @@ int main(int argc, char **argv)
             if (parse_int_range(optarg, 0, BB_SLOT_MAX - 1, "slot", &slot)) {
                 return -1;
             }
+            break;
+        case 'u':
+            if (parse_int_range(optarg, 0, BB_USER_MAX - 1, "user", &power_user)) {
+                return -1;
+            }
+            power_user_specified = 1;
             break;
         case 'R':
             remote = 1;
@@ -644,6 +738,18 @@ int main(int argc, char **argv)
             }
             do_mcs = 1;
             break;
+        case 'O':
+            if (parse_auto_mode(optarg, "power auto", &power_auto)) {
+                return -1;
+            }
+            do_power_auto = 1;
+            break;
+        case 'P':
+            if (parse_int_range(optarg, 0, 31, "power", &power)) {
+                return -1;
+            }
+            do_power = 1;
+            break;
         case 'F':
             if (parse_int_range(optarg, 0, 1, "frame change mode", &frame_change_mode)) {
                 return -1;
@@ -658,7 +764,7 @@ int main(int argc, char **argv)
 
     if (!do_chan_mode && !do_chan && !do_band_mode && !do_band &&
         !do_bandwidth_mode && !do_bandwidth && !do_mcs_mode && !do_mcs &&
-        !do_frame_change) {
+        !do_power_auto && !do_power && !do_frame_change) {
         printf("no link config action specified\n");
         usage(argv[0]);
         return -1;
@@ -735,6 +841,31 @@ int main(int argc, char **argv)
     if (do_mcs) {
         delay_before_config_cmd(executed_count);
         ret = set_mcs(ctx.handle, slot, mcs, remote ? slot : -1);
+        if (ret) {
+            goto done;
+        }
+        ++executed_count;
+    }
+
+    if (do_power_auto) {
+        delay_before_config_cmd(executed_count);
+        ret = set_power_auto(ctx.handle, power_auto, remote ? slot : -1);
+        if (ret) {
+            goto done;
+        }
+        ++executed_count;
+    }
+
+    if (do_power) {
+        if (!power_user_specified) {
+            ret = resolve_power_user(ctx.handle, remote ? slot : -1, &power_user);
+            if (ret) {
+                goto done;
+            }
+        }
+
+        delay_before_config_cmd(executed_count);
+        ret = set_power(ctx.handle, power_user, power, remote ? slot : -1);
         if (ret) {
             goto done;
         }

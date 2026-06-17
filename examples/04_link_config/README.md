@@ -1,8 +1,8 @@
 # 04_link_config 图传链路配置示例
 
-`l4_link_config` 用于设置图传链路的频段、信道、频宽、MCS 和帧结构配置。它和 `03_link_monitor` 配套使用：`03_link_monitor` 负责读取链路状态，`04_link_config` 负责下发链路配置。
+`l4_link_config` 用于设置图传链路的频段、信道、频宽、MCS、功率和帧结构配置。它和 `03_link_monitor` 配套使用：`03_link_monitor` 负责读取链路状态，`04_link_config` 负责下发链路配置。
 
-这个示例当前实现九个设置命令，均支持通过 `-R` 封装成 `BB_REMOTE_IOCTL_REQ` 远程设置对端。`BB_SET_FRAME_CHANGE` 只能在 AP 端执行；带 `-R` 时，程序会先远程读取对端状态，确认对端是 AP 且处于 `BB_MODE_SINGLE_USER` 后再下发。
+这个示例当前实现十一个设置命令，均支持通过 `-R` 封装成 `BB_REMOTE_IOCTL_REQ` 远程设置对端。`BB_SET_FRAME_CHANGE` 只能在 AP 端执行；带 `-R` 时，程序会先远程读取对端状态，确认对端是 AP 且处于 `BB_MODE_SINGLE_USER` 后再下发。
 
 | 命令字 | 作用 |
 | --- | --- |
@@ -14,6 +14,8 @@
 | `BB_SET_BANDWIDTH` | 手动设置目标频宽 |
 | `BB_SET_MCS_MODE` | 设置 MCS 自动/手动模式 |
 | `BB_SET_MCS` | 手动设置目标 MCS |
+| `BB_SET_POWER_AUTO` | 设置功率自适应开关 |
+| `BB_SET_POWER` | 设置固定发射功率 |
 | `BB_SET_FRAME_CHANGE` | 运行中改变帧结构，仅 AP 端 SINGLE_USER 模式 |
 
 ## 常用命令
@@ -58,13 +60,35 @@
 
 这里先把 slot 0 的 MCS 模式设置为手动，再把目标 MCS 设置为 SDK 枚举值 `6`。
 
+### 设置功率自适应
+
+```sh
+./l4_link_config -O 1
+```
+
+这里 `-O 1` 表示开启功率自适应，`-O 0` 表示关闭功率自适应。
+
+### 手动设置固定功率
+
+```sh
+./l4_link_config -O 0 -P 20
+```
+
+这里先关闭功率自适应，再把默认物理用户的发射功率设置为 `20 dBm`。如果需要指定物理用户，可增加 `-u <user>`。
+
 ### 远程设置对端配置
 
 ```sh
 ./l4_link_config -R -s 0 -B 0 -b 2g -C 0 -d rx -c 3 -W 0 -w 4 -M 0 -m 6
 ```
 
-`-R` 会把设置命令封装成 `BB_REMOTE_IOCTL_REQ`，通过 `-s <slot>` 指定的链路位置发给对端设备。远程模式支持 `-B`、`-b`、`-C`、`-c`、`-W`、`-w`、`-M`、`-m`、`-F`。其中 `-F` 只能让实际执行端为 AP；如果远程对端不是 AP，程序会报错退出。
+`-R` 会把设置命令封装成 `BB_REMOTE_IOCTL_REQ`，通过 `-s <slot>` 指定的链路位置发给对端设备。远程模式支持 `-B`、`-b`、`-C`、`-c`、`-W`、`-w`、`-M`、`-m`、`-O`、`-P`、`-F`。其中 `-F` 只能让实际执行端为 AP；如果远程对端不是 AP，程序会报错退出。
+
+远程设置对端固定功率示例：
+
+```sh
+./l4_link_config -R -s 0 -O 0 -P 20
+```
 
 ### 设置帧结构切换
 
@@ -74,13 +98,13 @@
 
 这里 `-F 1` 表示执行帧结构切换，`-F 0` 表示恢复原始帧结构。程序会先读取 `BB_GET_STATUS`，只有实际执行端是 AP 且当前模式是 `BB_MODE_SINGLE_USER` 时才会调用 `BB_SET_FRAME_CHANGE`。
 
-### 同时设置频段、信道、频宽和 MCS
+### 同时设置频段、信道、频宽、MCS 和功率
 
 ```sh
 ./l4_link_config -B 0 -b 2g -C 0 -d rx -c 3 -s 0 -W 0 -w 4 -M 0 -m 6
 ```
 
-程序会按固定顺序执行：频段模式、频段、信道模式、信道、频宽模式、频宽、MCS 模式、MCS。如果指定 `-F`，会在 MCS 后执行帧结构切换。一次命令行包含多个配置动作时，相邻两个配置命令之间会等待 200ms。
+程序会按固定顺序执行：频段模式、频段、信道模式、信道、频宽模式、频宽、MCS 模式、MCS、功率自适应、固定功率。如果指定 `-F`，会在功率设置后执行帧结构切换。一次命令行包含多个配置动作时，相邻两个配置命令之间会等待 200ms。
 
 ## 参数说明
 
@@ -90,7 +114,8 @@
 | `-p <port>` | daemon 端口，默认 `BB_PORT_DEFAULT` |
 | `-i <index>` | 设备序号，默认 `0` |
 | `-s <slot>` | slot 编号，默认 `0`；用于频宽和 MCS 配置，带 `-R` 时也是远程对端 slot |
-| `-R` | 通过远程 ioctl 设置 `-s <slot>` 指定的对端；支持 `-B`、`-b`、`-C`、`-c`、`-W`、`-w`、`-M`、`-m`、`-F` |
+| `-u <user>` | `BB_SET_POWER` 使用的物理用户；未指定时 AP 默认 `BB_USER_BR_CS`，DEV 默认 `BB_USER_0` |
+| `-R` | 通过远程 ioctl 设置 `-s <slot>` 指定的对端；支持 `-B`、`-b`、`-C`、`-c`、`-W`、`-w`、`-M`、`-m`、`-O`、`-P`、`-F` |
 | `-B <0|1>` | 调用 `BB_SET_BAND_MODE`，`1` 自动，`0` 手动 |
 | `-b <band>` | 调用 `BB_SET_BAND`，支持 `1g`、`2g`、`5g` 或 `0`、`1`、`2` |
 | `-C <0|1>` | 调用 `BB_SET_CHAN_MODE`，`1` 自动，`0` 手动 |
@@ -100,6 +125,8 @@
 | `-w <bandwidth>` | 调用 `BB_SET_BANDWIDTH`，范围 `0-5` |
 | `-M <0|1>` | 调用 `BB_SET_MCS_MODE`，`1` 自动，`0` 手动 |
 | `-m <mcs>` | 调用 `BB_SET_MCS`，范围 `0-24` |
+| `-O <0|1>` | 调用 `BB_SET_POWER_AUTO`，`1` 开启功率自适应，`0` 关闭功率自适应 |
+| `-P <power>` | 调用 `BB_SET_POWER`，固定发射功率范围 `0-31 dBm` |
 | `-F <0|1>` | 调用 `BB_SET_FRAME_CHANGE`，`1` 执行帧结构切换，`0` 恢复原始帧结构，仅 AP 端且 `BB_MODE_SINGLE_USER` 支持；带 `-R` 时检查远端角色和模式 |
 | `-h` | 打印帮助信息 |
 
@@ -246,6 +273,37 @@ bb_ioctl(handle, BB_SET_MCS, &input, NULL);
 
 注意：`-m` 使用的是 `bb_phy_mcs_e` 的枚举值，不是直接显示的调制档位名字。比如 `-m 0` 表示 `BB_PHY_MCS_NEG_2`，`-m 2` 表示 `BB_PHY_MCS_0`。
 
+### `BB_SET_POWER_AUTO`
+
+```c
+bb_set_pwr_auto_in_t input;
+input.pwr_auto = pwr_auto;
+link_config_ioctl(handle, BB_SET_POWER_AUTO, &input, sizeof(input),
+                  NULL, 0, remote_slot);
+```
+
+| 参数 | 字段 | 含义 |
+| --- | --- | --- |
+| `-O 1` | `pwr_auto = 1` | 开启功率自适应 |
+| `-O 0` | `pwr_auto = 0` | 关闭功率自适应 |
+
+### `BB_SET_POWER`
+
+```c
+bb_set_pwr_in_t input;
+input.usr = user;
+input.pwr = power;
+link_config_ioctl(handle, BB_SET_POWER, &input, sizeof(input),
+                  NULL, 0, remote_slot);
+```
+
+| 参数 | 字段 | 含义 |
+| --- | --- | --- |
+| `-u <user>` | `usr = user` | 物理用户 |
+| `-P <power>` | `pwr = power` | 固定发射功率，范围 `0-31 dBm` |
+
+未指定 `-u` 时，程序会读取实际执行端的 `BB_GET_STATUS`，AP 默认使用 `BB_USER_BR_CS`，DEV 默认使用 `BB_USER_0`。带 `-R` 时读取远端状态并在远端执行 `BB_SET_POWER`。
+
 ### `BB_SET_FRAME_CHANGE`
 
 ```c
@@ -304,6 +362,10 @@ BB_SET_MCS_MODE
     |
 BB_SET_MCS
     |
+BB_SET_POWER_AUTO
+    |
+BB_SET_POWER
+    |
 BB_SET_FRAME_CHANGE（仅指定 -F 时，且实际执行端必须是 AP + SINGLE_USER；支持 -R）
     |
 关闭设备连接
@@ -325,11 +387,11 @@ BB_SET_FRAME_CHANGE（仅指定 -F 时，且实际执行端必须是 AP + SINGLE
 
 ### 自动模式和手动设置不是一回事
 
-`-B 1`、`-C 1`、`-W 1`、`-M 1` 只是把设备切到自动模式。手动指定频段、信道、频宽或 MCS 时，通常要先设置对应模式为 `0`。
+`-B 1`、`-C 1`、`-W 1`、`-M 1`、`-O 1` 只是把设备切到自动模式。手动指定频段、信道、频宽、MCS 或功率时，通常要先设置对应模式为 `0`。
 
 ### 程序不会自动补发模式切换
 
-如果只执行 `-w 4`，程序只调用 `BB_SET_BANDWIDTH`，不会自动调用 `BB_SET_BANDWIDTH_MODE 0`。需要手动模式时，请显式写成 `-W 0 -w 4`。
+如果只执行 `-w 4`，程序只调用 `BB_SET_BANDWIDTH`，不会自动调用 `BB_SET_BANDWIDTH_MODE 0`。同理，只执行 `-P 20` 时程序只调用 `BB_SET_POWER`，不会自动调用 `BB_SET_POWER_AUTO 0`。需要手动模式时，请显式写成 `-W 0 -w 4` 或 `-O 0 -P 20`。
 
 ### 固定频点配置的控制关系
 
@@ -348,8 +410,8 @@ BB_SET_FRAME_CHANGE（仅指定 -F 时，且实际执行端必须是 AP + SINGLE
 
 ### `-R` 是远程 ioctl，不是 `BB_SET_REMOTE`
 
-`-R` 会把 `BB_SET_*` 命令封装成 `BB_REMOTE_IOCTL_REQ` 发给对端执行。它不会额外调用 `BB_SET_REMOTE`。`-W`、`-w`、`-F` 也走同一条远程 ioctl 路径；其中 `-F` 会先确认实际执行端是 AP。
+`-R` 会把 `BB_SET_*` 命令封装成 `BB_REMOTE_IOCTL_REQ` 发给对端执行。它不会额外调用 `BB_SET_REMOTE`。`-W`、`-w`、`-O`、`-P`、`-F` 也走同一条远程 ioctl 路径；其中 `-F` 会先确认实际执行端是 AP。
 
 ## 一句话总结
 
-`l4_link_config` 做的事情就是：连接 daemon，打开指定 8030 设备，然后按参数下发频段、信道、频宽、MCS 和帧结构相关配置；带 `-R` 时，配置会远程下发给 `-s <slot>` 指定的对端，其中 `-F` 只允许实际执行端为 AP。
+`l4_link_config` 做的事情就是：连接 daemon，打开指定 8030 设备，然后按参数下发频段、信道、频宽、MCS、功率和帧结构相关配置；带 `-R` 时，配置会远程下发给 `-s <slot>` 指定的对端，其中 `-F` 只允许实际执行端为 AP。
