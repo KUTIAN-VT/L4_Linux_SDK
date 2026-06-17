@@ -4,6 +4,7 @@
 #include "prj_rpc.h"
 #include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,11 +22,13 @@ typedef enum {
     ACTION_GET_SLOT_MAC,
     ACTION_GET_BAND,
     ACTION_GET_PWR,
+    ACTION_GET_FREQ_LIST,
     ACTION_SET_ROLE,
     ACTION_SET_AP_MAC,
     ACTION_SET_SLOT_MAC,
     ACTION_SET_BAND,
     ACTION_SET_PWR,
+    ACTION_SET_FREQ_LIST,
     ACTION_RESET,
     ACTION_REBOOT,
 } action_t;
@@ -44,6 +47,8 @@ typedef struct {
     int pwr_init;
     int pwr_min;
     int pwr_max;
+    uint32_t freq_num;
+    uint32_t freq[BB_CONFIG_MAX_CHAN_NUM];
     bb_mac_t mac;
 } options_t;
 
@@ -58,12 +63,13 @@ static void usage(const char *prog)
     printf("  -i, --index <index>     device index, default: 0\n");
     printf("\n");
     printf("Query actions:\n");
-    printf("  -A, --get-all           get role, AP MAC, slot 0 MAC, band and power\n");
+    printf("  -A, --get-all           get role, AP MAC, slot 0 MAC, band, power and freq list\n");
     printf("  -r, --get-role          get role\n");
     printf("  -m, --get-ap-mac        get AP MAC\n");
     printf("  -s, --get-slot-mac [n]  get slot MAC, default slot: 0\n");
     printf("  -b, --get-band          get band bitmap\n");
     printf("  -w, --get-pwr           get power\n");
+    printf("  -f, --get-freq-list     get frequency list\n");
     printf("\n");
     printf("Set actions:\n");
     printf("  -R, --set-role <role>   set role: ap/dev/0/1\n");
@@ -73,6 +79,8 @@ static void usage(const char *prog)
     printf("  -B, --set-band <band>   set band: auto/2g/5g/0x07/0x02/0x04\n");
     printf("  -W, --set-pwr <pwr|min,max>\n");
     printf("                           set fixed power or adaptive range, range: %d-%d\n", PWR_VALUE_MIN, PWR_VALUE_MAX);
+    printf("  -F, --set-freq-list <mhz,...>\n");
+    printf("                           set frequency list in MHz, max count: %d\n", BB_CONFIG_MAX_CHAN_NUM);
     printf("  -D, --reset             reset MiniDB\n");
     printf("\n");
     printf("Other options:\n");
@@ -320,6 +328,81 @@ static int parse_slot_mac_arg(const char *text, int *slot, bb_mac_t *mac)
     return parse_mac(comma + 1, mac);
 }
 
+static int parse_freq_mhz(const char *text, uint32_t *freq_khz)
+{
+    char *end = NULL;
+    unsigned long value;
+
+    if (!text || *text == '\0') {
+        printf("invalid frequency: empty value\n");
+        return -1;
+    }
+
+    errno = 0;
+    value = strtoul(text, &end, 10);
+    if (errno || end == text || *end != '\0' || value == 0 || value > UINT32_MAX / 1000UL) {
+        printf("invalid frequency: %s, expected positive integer MHz\n", text);
+        return -1;
+    }
+
+    *freq_khz = (uint32_t)(value * 1000UL);
+    return 0;
+}
+
+static int parse_freq_list_arg(const char *text, options_t *opts)
+{
+    char copy[512];
+    char *token;
+    uint32_t count = 0;
+
+    if (!text || *text == '\0') {
+        printf("frequency list is empty\n");
+        return -1;
+    }
+
+    if (strlen(text) >= sizeof(copy)) {
+        printf("frequency list argument is too long\n");
+        return -1;
+    }
+
+    strcpy(copy, text);
+    token = copy;
+    while (token) {
+        char *comma = strchr(token, ',');
+        char *next = NULL;
+
+        if (comma) {
+            *comma = '\0';
+            next = comma + 1;
+        }
+
+        if (*token == '\0') {
+            printf("invalid frequency list: %s\n", text);
+            return -1;
+        }
+
+        if (count >= BB_CONFIG_MAX_CHAN_NUM) {
+            printf("frequency count exceeds max: %d\n", BB_CONFIG_MAX_CHAN_NUM);
+            return -1;
+        }
+
+        if (parse_freq_mhz(token, &opts->freq[count])) {
+            return -1;
+        }
+        ++count;
+
+        token = next;
+    }
+
+    if (count == 0) {
+        printf("frequency list is empty\n");
+        return -1;
+    }
+
+    opts->freq_num = count;
+    return 0;
+}
+
 static const char *role_name(int role)
 {
     switch (role) {
@@ -356,6 +439,36 @@ static void print_mac(const bb_mac_t *mac)
     for (int i = 0; i < BB_MAC_LEN; ++i) {
         printf("%s%02x", i == 0 ? "" : ":", mac->addr[i]);
     }
+}
+
+static void print_freq_list_mhz(const uint32_t *freq, uint32_t freq_num)
+{
+    for (uint32_t i = 0; i < freq_num; ++i) {
+        uint32_t mhz = freq[i] / 1000;
+        uint32_t khz_rem = freq[i] % 1000;
+
+        printf("%s%u", i == 0 ? "" : ",", mhz);
+        if (khz_rem) {
+            printf(".%03u", khz_rem);
+        }
+    }
+}
+
+static void print_freq_list_khz(const uint32_t *freq, uint32_t freq_num)
+{
+    for (uint32_t i = 0; i < freq_num; ++i) {
+        printf("%s%u", i == 0 ? "" : ",", freq[i]);
+    }
+}
+
+static uint32_t clamp_freq_num(uint32_t freq_num)
+{
+    if (freq_num > BB_CONFIG_MAX_CHAN_NUM) {
+        printf("freq_num %u exceeds max %d, clamp for display\n", freq_num, BB_CONFIG_MAX_CHAN_NUM);
+        return BB_CONFIG_MAX_CHAN_NUM;
+    }
+
+    return freq_num;
 }
 
 static int minidb_set_dispatch(bb_dev_handle_t *handle, uint8_t cmdid, const void *payload, size_t payload_size)
@@ -598,6 +711,51 @@ static int get_pwr(bb_dev_handle_t *handle, int compact)
     return 0;
 }
 
+static int get_freq_list(bb_dev_handle_t *handle, int compact)
+{
+    prj_cmd_get_freq_list_t freq_list;
+    uint32_t freq_num;
+    int ret;
+
+    memset(&freq_list, 0, sizeof(freq_list));
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_FREQ_LIST, NULL, 0, &freq_list, sizeof(freq_list));
+    if (ret == MINIDB_RET_UNSET) {
+        if (compact) {
+            printf("freq_list: unset\n");
+        } else {
+            printf("[PRJ_CMD_GET_FREQ_LIST]\n");
+            printf("freq_list=unset\n");
+        }
+        return 0;
+    }
+    if (ret) {
+        return ret;
+    }
+
+    freq_num = clamp_freq_num(freq_list.freq_num);
+    if (compact) {
+        printf("freq_list: ");
+        if (freq_num == 0) {
+            printf("empty");
+        } else {
+            print_freq_list_mhz(freq_list.freq, freq_num);
+            printf(" MHz");
+        }
+        printf("\n");
+    } else {
+        printf("[PRJ_CMD_GET_FREQ_LIST]\n");
+        printf("freq_num=%u\n", freq_list.freq_num);
+        printf("freq_mhz=");
+        print_freq_list_mhz(freq_list.freq, freq_num);
+        printf("\n");
+        printf("freq_khz=");
+        print_freq_list_khz(freq_list.freq, freq_num);
+        printf("\n");
+    }
+
+    return 0;
+}
+
 static int get_all(bb_dev_handle_t *handle)
 {
     int ret = 0;
@@ -608,6 +766,7 @@ static int get_all(bb_dev_handle_t *handle)
     ret |= get_slot_mac(handle, 0, 1);
     ret |= get_band(handle, 1);
     ret |= get_pwr(handle, 1);
+    ret |= get_freq_list(handle, 1);
 
     return ret ? -1 : 0;
 }
@@ -734,6 +893,32 @@ static int set_pwr(bb_dev_handle_t *handle, const options_t *opts)
     return 0;
 }
 
+static int set_freq_list(bb_dev_handle_t *handle, const options_t *opts)
+{
+    prj_cmd_set_freq_list_t payload;
+    int ret;
+
+    memset(&payload, 0, sizeof(payload));
+    payload.freq_num = opts->freq_num;
+    memcpy(payload.freq, opts->freq, opts->freq_num * sizeof(opts->freq[0]));
+
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_FREQ_LIST, &payload, sizeof(payload));
+    if (ret) {
+        return ret;
+    }
+
+    printf("[PRJ_CMD_SET_FREQ_LIST]\n");
+    printf("freq_num=%u\n", payload.freq_num);
+    printf("freq_mhz=");
+    print_freq_list_mhz(payload.freq, payload.freq_num);
+    printf("\n");
+    printf("freq_khz=");
+    print_freq_list_khz(payload.freq, payload.freq_num);
+    printf("\n");
+    printf("set minidb frequency list ok\n");
+    return 0;
+}
+
 static int reset_minidb(bb_dev_handle_t *handle)
 {
     int ret = minidb_set_dispatch(handle, PRJ_CMD_SET_RESET_DB, NULL, 0);
@@ -775,11 +960,13 @@ static int parse_options(int argc, char **argv, options_t *opts)
         OPT_GET_SLOT_MAC,
         OPT_GET_BAND,
         OPT_GET_PWR,
+        OPT_GET_FREQ_LIST,
         OPT_SET_ROLE,
         OPT_SET_AP_MAC,
         OPT_SET_SLOT_MAC,
         OPT_SET_BAND,
         OPT_SET_PWR,
+        OPT_SET_FREQ_LIST,
         OPT_RESET,
         OPT_REBOOT,
         OPT_ADDR,
@@ -795,11 +982,13 @@ static int parse_options(int argc, char **argv, options_t *opts)
         {"get-slot-mac", optional_argument, NULL, OPT_GET_SLOT_MAC},
         {"get-band", no_argument, NULL, OPT_GET_BAND},
         {"get-pwr", no_argument, NULL, OPT_GET_PWR},
+        {"get-freq-list", no_argument, NULL, OPT_GET_FREQ_LIST},
         {"set-role", required_argument, NULL, OPT_SET_ROLE},
         {"set-ap-mac", required_argument, NULL, OPT_SET_AP_MAC},
         {"set-slot-mac", required_argument, NULL, OPT_SET_SLOT_MAC},
         {"set-band", required_argument, NULL, OPT_SET_BAND},
         {"set-pwr", required_argument, NULL, OPT_SET_PWR},
+        {"set-freq-list", required_argument, NULL, OPT_SET_FREQ_LIST},
         {"reset", no_argument, NULL, OPT_RESET},
         {"reboot", no_argument, NULL, OPT_REBOOT},
         {"addr", required_argument, NULL, OPT_ADDR},
@@ -813,7 +1002,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
 
     init_options(opts);
 
-    while ((opt = getopt_long(argc, argv, "ha:p:i:Arms::bwR:M:S:B:W:DH", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "ha:p:i:Arms::bwfR:M:S:B:W:F:DH", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
         case OPT_HELP:
@@ -878,6 +1067,12 @@ static int parse_options(int argc, char **argv, options_t *opts)
                 return -1;
             }
             break;
+        case 'f':
+        case OPT_GET_FREQ_LIST:
+            if (set_action(opts, ACTION_GET_FREQ_LIST)) {
+                return -1;
+            }
+            break;
         case 'R':
         case OPT_SET_ROLE:
             if (set_action(opts, ACTION_SET_ROLE) || parse_role(optarg, &opts->role)) {
@@ -915,6 +1110,12 @@ static int parse_options(int argc, char **argv, options_t *opts)
                 return -1;
             }
             break;
+        case 'F':
+        case OPT_SET_FREQ_LIST:
+            if (set_action(opts, ACTION_SET_FREQ_LIST) || parse_freq_list_arg(optarg, opts)) {
+                return -1;
+            }
+            break;
         case 'D':
         case OPT_RESET:
             if (set_action(opts, ACTION_RESET)) {
@@ -944,7 +1145,8 @@ static int parse_options(int argc, char **argv, options_t *opts)
 
         if (opts->action == ACTION_GET_ALL || opts->action == ACTION_GET_ROLE ||
             opts->action == ACTION_GET_AP_MAC || opts->action == ACTION_GET_SLOT_MAC ||
-            opts->action == ACTION_GET_BAND || opts->action == ACTION_GET_PWR) {
+            opts->action == ACTION_GET_BAND || opts->action == ACTION_GET_PWR ||
+            opts->action == ACTION_GET_FREQ_LIST) {
             printf("reboot can only be used with set/reset actions\n");
             return -1;
         }
@@ -973,6 +1175,8 @@ static int run_action(bb_dev_handle_t *handle, const options_t *opts)
         return get_band(handle, 0);
     case ACTION_GET_PWR:
         return get_pwr(handle, 0);
+    case ACTION_GET_FREQ_LIST:
+        return get_freq_list(handle, 0);
     case ACTION_SET_ROLE:
         return set_role(handle, opts->role);
     case ACTION_SET_AP_MAC:
@@ -983,6 +1187,8 @@ static int run_action(bb_dev_handle_t *handle, const options_t *opts)
         return set_band(handle, opts->band);
     case ACTION_SET_PWR:
         return set_pwr(handle, opts);
+    case ACTION_SET_FREQ_LIST:
+        return set_freq_list(handle, opts);
     case ACTION_RESET:
         return reset_minidb(handle);
     case ACTION_REBOOT:
