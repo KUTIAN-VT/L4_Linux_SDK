@@ -13,6 +13,7 @@
 #define PWR_VALUE_MAX 27
 #define MINIDB_UNSET_RET (-8)
 #define MINIDB_RET_UNSET 1
+#define UART_BAUDRATE_CONFIG_ID 2
 
 typedef enum {
     ACTION_NONE = 0,
@@ -29,6 +30,8 @@ typedef enum {
     ACTION_SET_BAND,
     ACTION_SET_PWR,
     ACTION_SET_FREQ_LIST,
+    ACTION_GET_UART_BAUDRATE,
+    ACTION_SET_UART_BAUDRATE,
     ACTION_RESET,
     ACTION_REBOOT,
 } action_t;
@@ -47,6 +50,7 @@ typedef struct {
     int pwr_init;
     int pwr_min;
     int pwr_max;
+    uint32_t uart_baudrate;
     uint32_t freq_num;
     uint32_t freq[BB_CONFIG_MAX_CHAN_NUM];
     bb_mac_t mac;
@@ -70,6 +74,8 @@ static void usage(const char *prog)
     printf("  -b, --get-band          get band bitmap\n");
     printf("  -w, --get-pwr           get power\n");
     printf("  -f, --get-freq-list     get frequency list\n");
+    printf("  -u, --get-uart-baudrate\n");
+    printf("                           get MiniDB UART2 baudrate\n");
     printf("\n");
     printf("Set actions:\n");
     printf("  -R, --set-role <role>   set role: ap/dev/0/1\n");
@@ -81,6 +87,8 @@ static void usage(const char *prog)
     printf("                           set fixed power or adaptive range, range: %d-%d\n", PWR_VALUE_MIN, PWR_VALUE_MAX);
     printf("  -F, --set-freq-list <mhz,...>\n");
     printf("                           set frequency list in MHz, max count: %d\n", BB_CONFIG_MAX_CHAN_NUM);
+    printf("  -U, --set-uart-baudrate <rate>\n");
+    printf("                           set MiniDB UART2 baudrate\n");
     printf("  -D, --reset             reset MiniDB\n");
     printf("\n");
     printf("Other options:\n");
@@ -153,6 +161,22 @@ static int parse_int_range(const char *text, int min_value, int max_value, const
     }
 
     *out = (int)value;
+    return 0;
+}
+
+static int parse_u32_range(const char *text, uint32_t min_value, uint32_t max_value, const char *name, uint32_t *out)
+{
+    char *end = NULL;
+    unsigned long value;
+
+    errno = 0;
+    value = strtoul(text, &end, 0);
+    if (errno || end == text || *end != '\0' || value < min_value || value > max_value) {
+        printf("invalid %s: %s, valid range: %u-%u\n", name, text, min_value, max_value);
+        return -1;
+    }
+
+    *out = (uint32_t)value;
     return 0;
 }
 
@@ -919,6 +943,94 @@ static int set_freq_list(bb_dev_handle_t *handle, const options_t *opts)
     return 0;
 }
 
+static void init_uart2_default_config(prj_cmd_set_uart_t *payload)
+{
+    memset(payload, 0, sizeof(*payload));
+    payload->id = UART_BAUDRATE_CONFIG_ID;
+    payload->apply = 0;
+    payload->baudrate = 115200;
+    payload->dbit = 8;
+    payload->parity = 0;
+    payload->stop_bit = 1;
+    payload->rx_buff_size = 0;
+}
+
+static int read_uart2_minidb_config(bb_dev_handle_t *handle, prj_cmd_set_uart_t *payload)
+{
+    prj_cmd_get_uart_in_t input;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    input.id = UART_BAUDRATE_CONFIG_ID;
+    input.running = 0;
+
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_UART, &input, sizeof(input), payload, sizeof(*payload));
+    if (ret == MINIDB_RET_UNSET) {
+        init_uart2_default_config(payload);
+        return 0;
+    }
+    if (ret) {
+        return ret;
+    }
+
+    payload->id = UART_BAUDRATE_CONFIG_ID;
+    payload->apply = 0;
+    return 0;
+}
+
+static int get_uart_baudrate(bb_dev_handle_t *handle)
+{
+    prj_cmd_get_uart_in_t input;
+    prj_cmd_get_uart_out_t output;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+    input.id = UART_BAUDRATE_CONFIG_ID;
+    input.running = 0;
+
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_UART, &input, sizeof(input), &output, sizeof(output));
+    printf("[PRJ_CMD_GET_UART]\n");
+    printf("id=%u\n", UART_BAUDRATE_CONFIG_ID);
+    if (ret == MINIDB_RET_UNSET) {
+        printf("uart2_baudrate=unset\n");
+        return 0;
+    }
+    if (ret) {
+        return ret;
+    }
+
+    printf("uart2_baudrate=%u\n", output.baudrate);
+    return 0;
+}
+
+static int set_uart_baudrate(bb_dev_handle_t *handle, uint32_t baudrate)
+{
+    prj_cmd_set_uart_t payload;
+    int ret;
+
+    ret = read_uart2_minidb_config(handle, &payload);
+    if (ret) {
+        return ret;
+    }
+
+    payload.id = UART_BAUDRATE_CONFIG_ID;
+    payload.apply = 0;
+    payload.baudrate = baudrate;
+
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_UART, &payload, sizeof(payload));
+    if (ret) {
+        return ret;
+    }
+
+    printf("[PRJ_CMD_SET_UART]\n");
+    printf("id=%u\n", payload.id);
+    printf("uart2_baudrate=%u\n", payload.baudrate);
+    printf("set minidb UART2 baudrate ok\n");
+    return 0;
+}
+
+
 static int reset_minidb(bb_dev_handle_t *handle)
 {
     int ret = minidb_set_dispatch(handle, PRJ_CMD_SET_RESET_DB, NULL, 0);
@@ -961,12 +1073,14 @@ static int parse_options(int argc, char **argv, options_t *opts)
         OPT_GET_BAND,
         OPT_GET_PWR,
         OPT_GET_FREQ_LIST,
+        OPT_GET_UART_BAUDRATE,
         OPT_SET_ROLE,
         OPT_SET_AP_MAC,
         OPT_SET_SLOT_MAC,
         OPT_SET_BAND,
         OPT_SET_PWR,
         OPT_SET_FREQ_LIST,
+        OPT_SET_UART_BAUDRATE,
         OPT_RESET,
         OPT_REBOOT,
         OPT_ADDR,
@@ -983,12 +1097,14 @@ static int parse_options(int argc, char **argv, options_t *opts)
         {"get-band", no_argument, NULL, OPT_GET_BAND},
         {"get-pwr", no_argument, NULL, OPT_GET_PWR},
         {"get-freq-list", no_argument, NULL, OPT_GET_FREQ_LIST},
+        {"get-uart-baudrate", no_argument, NULL, OPT_GET_UART_BAUDRATE},
         {"set-role", required_argument, NULL, OPT_SET_ROLE},
         {"set-ap-mac", required_argument, NULL, OPT_SET_AP_MAC},
         {"set-slot-mac", required_argument, NULL, OPT_SET_SLOT_MAC},
         {"set-band", required_argument, NULL, OPT_SET_BAND},
         {"set-pwr", required_argument, NULL, OPT_SET_PWR},
         {"set-freq-list", required_argument, NULL, OPT_SET_FREQ_LIST},
+        {"set-uart-baudrate", required_argument, NULL, OPT_SET_UART_BAUDRATE},
         {"reset", no_argument, NULL, OPT_RESET},
         {"reboot", no_argument, NULL, OPT_REBOOT},
         {"addr", required_argument, NULL, OPT_ADDR},
@@ -1002,7 +1118,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
 
     init_options(opts);
 
-    while ((opt = getopt_long(argc, argv, "ha:p:i:Arms::bwfR:M:S:B:W:F:DH", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "ha:p:i:Arms::bwfuR:M:S:B:W:F:U:DH", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
         case OPT_HELP:
@@ -1073,6 +1189,12 @@ static int parse_options(int argc, char **argv, options_t *opts)
                 return -1;
             }
             break;
+        case 'u':
+        case OPT_GET_UART_BAUDRATE:
+            if (set_action(opts, ACTION_GET_UART_BAUDRATE)) {
+                return -1;
+            }
+            break;
         case 'R':
         case OPT_SET_ROLE:
             if (set_action(opts, ACTION_SET_ROLE) || parse_role(optarg, &opts->role)) {
@@ -1116,6 +1238,13 @@ static int parse_options(int argc, char **argv, options_t *opts)
                 return -1;
             }
             break;
+        case 'U':
+        case OPT_SET_UART_BAUDRATE:
+            if (set_action(opts, ACTION_SET_UART_BAUDRATE) ||
+                parse_u32_range(optarg, 1, UINT32_MAX, "uart baudrate", &opts->uart_baudrate)) {
+                return -1;
+            }
+            break;
         case 'D':
         case OPT_RESET:
             if (set_action(opts, ACTION_RESET)) {
@@ -1146,7 +1275,8 @@ static int parse_options(int argc, char **argv, options_t *opts)
         if (opts->action == ACTION_GET_ALL || opts->action == ACTION_GET_ROLE ||
             opts->action == ACTION_GET_AP_MAC || opts->action == ACTION_GET_SLOT_MAC ||
             opts->action == ACTION_GET_BAND || opts->action == ACTION_GET_PWR ||
-            opts->action == ACTION_GET_FREQ_LIST) {
+            opts->action == ACTION_GET_FREQ_LIST ||
+            opts->action == ACTION_GET_UART_BAUDRATE) {
             printf("reboot can only be used with set/reset actions\n");
             return -1;
         }
@@ -1177,6 +1307,8 @@ static int run_action(bb_dev_handle_t *handle, const options_t *opts)
         return get_pwr(handle, 0);
     case ACTION_GET_FREQ_LIST:
         return get_freq_list(handle, 0);
+    case ACTION_GET_UART_BAUDRATE:
+        return get_uart_baudrate(handle);
     case ACTION_SET_ROLE:
         return set_role(handle, opts->role);
     case ACTION_SET_AP_MAC:
@@ -1189,6 +1321,8 @@ static int run_action(bb_dev_handle_t *handle, const options_t *opts)
         return set_pwr(handle, opts);
     case ACTION_SET_FREQ_LIST:
         return set_freq_list(handle, opts);
+    case ACTION_SET_UART_BAUDRATE:
+        return set_uart_baudrate(handle, opts->uart_baudrate);
     case ACTION_RESET:
         return reset_minidb(handle);
     case ACTION_REBOOT:

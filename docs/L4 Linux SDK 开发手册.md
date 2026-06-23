@@ -1245,11 +1245,13 @@ MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 
 | `-s [slot]` | `--get-slot-mac[=slot]` | 查询 MiniDB 中保存的 slot MAC | slot 0 |
 | `-b` | `--get-band` | 查询 MiniDB 中保存的 band bitmap | 不执行 |
 | `-w` | `--get-pwr` | 查询 MiniDB 中保存的 power 配置 | 不执行 |
+| `-u` | `--get-uart-baudrate` | 查询 MiniDB 中保存的 UART2 波特率 | 不执行 |
 | `-R <ap|dev|0|1>` | `--set-role <...>` | 设置 MiniDB role | 不执行 |
 | `-M <mac>` | `--set-ap-mac <mac>` | 设置 MiniDB AP MAC | 不执行 |
 | `-S <mac|slot,mac>` | `--set-slot-mac <mac|slot,mac>` | 设置 MiniDB slot MAC | slot 0 |
 | `-B <auto|2g|5g|bitmap>` | `--set-band <...>` | 设置 MiniDB band bitmap | 不执行 |
 | `-W <pwr|min,max>` | `--set-pwr <...>` | 设置 MiniDB 固定功率或功率自适应区间 | 不执行 |
+| `-U <baudrate>` | `--set-uart-baudrate <baudrate>` | 设置 MiniDB UART2 波特率 | 不执行 |
 | `-D` | `--reset` | 重置 MiniDB | 不执行 |
 | `-H` | `--reboot` | 单独重启设备，或设置/重置成功后重启设备 | 不执行 |
 
@@ -1279,6 +1281,8 @@ band bitmap 支持名称和数值：
 | --- | --- |
 | `-W 20` | 设置固定功率，写入 `pwr_auto=0`、`pwr_init=20` |
 | `-W 10,27` | 设置自适应功率区间，写入 `pwr_auto=1`、`pwr_min=10`、`pwr_max=27` |
+
+UART 波特率配置固定操作 UART2。`-U <baudrate>` 只修改 MiniDB 中 UART2 的波特率，保留已有数据位、校验位、停止位和 RX buffer 配置；如果 UART2 尚未配置，则使用 `8N1` 和默认 RX buffer 创建配置。
 
 #### 6.3 示例
 
@@ -1677,7 +1681,106 @@ band=auto(0x07)
 reboot requested
 ```
 
+##### 6.3.15 设置 UART2 波特率后查询
+
+将 MiniDB 中 UART2 波特率设置为 `115200`：
+
+```sh
+./l4_minidb_config -U 115200
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_UART]
+id=2
+uart2_baudrate=115200
+set minidb UART2 baudrate ok
+```
+
+查询确认 MiniDB 中保存的 UART2 波特率：
+
+```sh
+./l4_minidb_config -u
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_UART]
+id=2
+uart2_baudrate=115200
+```
+
+### 7、UART 配置示例
+
+`l4_uart_config` 用于演示通过 `PRJ_CMD_SET_UART` 和 `PRJ_CMD_GET_UART` 设置、查询设备 UART 配置。该示例使用 SDK 统一例程参数风格，`-a/-p/-i` 用于连接 daemon 和选择设备，UART id 由 `--get-uart` 或 `--set-uart` 指定。
+
+#### 7.1 程序参数说明
+
+公共参数：
+
+| 参数 | 长参数 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `-h` | `--help` | 打印帮助 | 无 |
+| `-a <addr>` | `--addr <addr>` | daemon 地址 | `127.0.0.1` |
+| `-p <port>` | `--port <port>` | daemon 端口 | `BB_PORT_DEFAULT` |
+| `-i <index>` | `--index <index>` | 设备序号 | `0` |
+
+查询参数：
+
+| 参数 | 长参数 | 说明 |
+| --- | --- | --- |
+| `-g <id>` | `--get-uart <id>` | 查询指定 UART 的 running 配置 |
+
+设置参数：
+
+| 参数 | 长参数 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `-U <id>` | `--set-uart <id>` | 设置指定 UART | 无 |
+| `-b <rate>` | `--baudrate <rate>` | UART 波特率 | `115200` |
+| `-d <5-8>` | `--data-bit <5-8>` | UART 数据位 | `8` |
+| `-P <parity>` | `--parity <parity>` | UART 校验位，支持 `none/even/odd/0/1/2` | `none` |
+| `-T <1-3>` | `--stop-bit <1-3>` | UART 停止位协议值，`1:1bit / 2:1.5bits / 3:2bits` | `1` |
+| `-r <n>` | `--rx-buf-size <n>` | UART RX buffer 大小，`0` 表示设备默认值 | `0` |
+| `-A` | `--apply` | 设置后请求立即应用到运行态 | 不执行 |
+
+其它参数：
+
+| 参数 | 长参数 | 说明 |
+| --- | --- | --- |
+| `-s <slot>` | `--slot <slot>` | 通过 remote ioctl slot 执行命令 |
+
+每次运行只允许一个主动作：`--get-uart` 或 `--set-uart` 二选一。设置动作不会自动查询，设置后如需确认，请再次执行 `--get-uart`。
+
+#### 7.2 示例
+
+只查询 UART 1：
+
+```sh
+./l4_uart_config -g 1
+```
+
+设置 UART 1 为 `115200 8N1`，写入 MiniDB：
+
+```sh
+./l4_uart_config -U 1 -b 115200 -d 8 -P none -T 1 -r 0
+```
+
+设置 UART 1 为 `9600 8N1`，并请求立即应用到运行态：
+
+```sh
+./l4_uart_config -U 1 -b 9600 -d 8 -P none -T 1 -A
+```
+
+通过 remote ioctl slot 0 查询 UART 1：
+
+```sh
+./l4_uart_config -s 0 -g 1
+```
+
 ## 四、常见问题
+
 
 ### 1、程序提示没有设备
 
