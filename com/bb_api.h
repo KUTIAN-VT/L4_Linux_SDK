@@ -92,6 +92,8 @@ extern "C" {
 #define BB_CFG_SHARE_SLOT                   BB_REQUEST(BB_REQ_CFG, 16)  /**<@attention 配置共享时隙机制*/
 #define BB_CFG_AGC                          BB_REQUEST(BB_REQ_CFG, 17)  /**<@attention 配置扫频校准参数*/
 #define BB_CFG_AGIN                         BB_REQUEST(BB_REQ_CFG, 18)  /**<@attention 配置RSSI校准参数*/
+#define BB_CFG_PWR_BASIC_EX                 BB_REQUEST(BB_REQ_CFG, 19)  /**<@attention 配置扩展功率参数*/
+#define BB_CFG_RF_CALI                      BB_REQUEST(BB_REQ_CFG, 20)  /**<@attention 配置RF校准增益>*/
 
 // bb ioctl request type - get
 #define BB_GET_STATUS                       BB_REQUEST(BB_REQ_GET, 0)   /**<@attention 读取基带工作状态命令字*/
@@ -129,6 +131,9 @@ extern "C" {
 #define BB_GET_POWER_OFFSET2                BB_REQUEST(BB_REQ_GET, 113) /**<@note 获取功率补偿值*/
 #define BB_GET_CUSTOMER_KEY                 BB_REQUEST(BB_REQ_GET, 114) /**<@note 获取customer key*/
 #define BB_GET_BOOT_REASON                  BB_REQUEST(BB_REQ_GET, 115) /**<@note 获取重启原因*/
+#define BB_GET_CLEAN_MODE_MSG_CHECK         BB_REQUEST(BB_REQ_GET, 116) /**<@note 检测msg在纯净模式下是否合法*/
+#define BB_GET_RECOVERY_MODE                BB_REQUEST(BB_REQ_GET, 117) /**<@note 当前是否为恢复模式*/
+#define BB_GET_DEV_CONNECT_SLOT             BB_REQUEST(BB_REQ_GET, 118) /**<@note 获取dev当前connect的slot*/
 
 #define BB_GET_PRJ_DISPATCH                 BB_REQUEST(BB_REQ_GET, 200) /**<@note 二级GET命令分发*/
 
@@ -168,6 +173,8 @@ extern "C" {
 #define BB_SET_BANDWIDTH_MODE               BB_REQUEST(BB_REQ_SET, 32)  /**<@note 设置频宽控制模式*/
 #define BB_SET_LOCAL_MAC                    BB_REQUEST(BB_REQ_SET, 33)  /**<@note 设置本机运行时MAC*/
 #define BB_SET_CUSTOMER_KEY                 BB_REQUEST(BB_REQ_SET, 34)  /**<@note 写入customer key*/
+#define BB_SET_CHAN_PWR_PLUS                BB_REQUEST(BB_REQ_SET, 35)  /**<@note 设置频点粒度的功率最大值*/
+#define BB_SET_ENTER_RECOVERY_MODE          BB_REQUEST(BB_REQ_SET, 36)  /**<@note 重启并进入恢复模式*/
 
 // 以下为调试诊断类命令字
 #define BB_SET_REG                          BB_REQUEST(BB_REQ_SET, 100) /**<@note 基带寄存器写入命令字，本类型用于调试诊断*/
@@ -724,6 +731,7 @@ typedef struct {
     uint8_t         hop_on_idle_dir_bmp;                        /**<@note BR跳频(IDLE)方向BMP*/
     uint8_t         hop_on_idle_cnt;                            /**<@note BR跳频(IDLE)帧计数*/
     uint8_t         hop_on_idle_policy;                         /**<@note BR跳频(IDLE)依据*/
+    uint8_t         hop_on_idle_band_switch;                    /**<@note BR跳频(IDLE)频段切换*/
     uint8_t         chan_num;                                   /**<@note 指定chan_freq中的频点数量*/
     uint8_t         chan_id;                                    /**<@note 指定chan_freq中生效的频点*/
     uint32_t        chan_freq[BB_CONFIG_MAX_CHAN_NUM];          /**<@note 频点表 单位：KHz*/
@@ -974,6 +982,9 @@ typedef struct {
     int8_t gain_a_thres;
     int8_t gain_b_thres;
 } bb_conf_gain_t;
+
+/**定义配置命令BB_CFG_RF_CALI的输入参数结构*/
+typedef uint8_t bb_conf_rf_cali_t[BB_BAND_MAX];
 
 // ################# get struct definition #####################
 
@@ -1366,6 +1377,12 @@ typedef struct {
 typedef struct {
     bb_mac_t        mac;
 } bb_set_local_mac_t;
+
+/**定义设置命令BB_SET_CHAN_PWR_PLUS的输入参数结构*/
+typedef struct {
+    uint8_t num;                                                /**<@note 频点数量*/
+    int8_t chan_pwr_plus[512];                                  /**<@note 频点最大功率偏移值*/
+} bb_set_chan_pwr_plus_t;
 
 /**定义设置命令BB_SET_CHAN_MODE的输入参数结构*/
 typedef struct {
@@ -1763,6 +1780,7 @@ typedef enum
     BB_BOOT_REASON_USER_MODE_ENVIRONMENT,                       /**<@note User mode enviremnment 后看门狗重启*/
     BB_BOOT_REASON_MACHINE_MODE_ENVIRONMENT,                    /**<@note Machine mode enviremnment 后看门狗重启*/
     BB_BOOT_REASON_UNKNOWN,                                     /**<@note 未知原因重启*/
+    BB_BOOT_REASON_ENTER_RECOVERY_MODE,                         /**<@note 未知原因重启*/
     BB_BOOT_REASON_MAX
 }ENUM_BB_BOOT_REASON;
 
@@ -1775,6 +1793,27 @@ typedef struct {
     uint32_t repeat_time;                                       /**<@note 相同重启原因的重复次数*/
     char desc[64];                                              /**<@note 重启原因描述*/
 } bb_get_boot_reason_out_t;
+
+/**定义读取命令BB_GET_CLEAN_MODE_MSG_CHECK的输入参数结构*/
+typedef struct {
+    uint32_t msg_id;                                            /**<@note 需要检测的msg_id*/
+} bb_get_clean_mode_msg_check_in_t;
+
+/**定义读取命令BB_GET_CLEAN_MODE_MSG_CHECK的输出参数结构*/
+typedef struct {
+    uint8_t valid;                                              /**<@note 0:不可使用, >0:可使用*/
+    uint8_t rsv[3];
+} bb_get_clean_mode_msg_check_out_t;
+
+/**定义读取命令BB_GET_RECOVERY_MODE的输出参数结构*/
+typedef struct {
+    uint8_t mode;                                               /**<@note mode=1为recovery mode， mode=0为正常模式 */
+} bb_get_recovery_mode_out_t;
+
+/**定义读取命令BB_GET_DEV_CONNECT_SLOT的输出参数结构*/
+typedef struct {
+    uint8_t slot;                                               /**<@note 未连接或者AP角色下，返回BB_SLOT_MAX */
+} bb_get_dev_connect_slot_out_t;
 
 /** @} */  /** <!-- ==== Structure Definition end ==== */
 

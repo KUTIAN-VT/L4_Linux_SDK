@@ -53,8 +53,8 @@ enum ar_net_operate_code_e
 /** 网络设备接口(linux) */
 AR8030_API int bb_net_dev_open(bb_dev_handle_t* dev);
 AR8030_API int bb_net_dev_close(int net_dev_fd);
-AR8030_API int bb_net_dev_create(int net_dev_fd, ar_netif_t *ar_netif);
-AR8030_API int bb_net_dev_destroy(int net_dev_fd, unsigned char slot, unsigned short socket_port);
-AR8030_API int bb_net_dev_buf_resize(int net_dev_fd, ar_netif_t *ar_netif);
+AR8030_API int bb_net_dev_create(bb_dev_handle_t* dev, ar_netif_t *ar_netif);
+AR8030_API int bb_net_dev_destroy(bb_dev_handle_t* dev, unsigned char slot, unsigned short socket_port);
+AR8030_API int bb_net_dev_buf_resize(bb_dev_handle_t* dev, ar_netif_t *ar_netif);
 
 #endif

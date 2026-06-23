@@ -1,7 +1,7 @@
 # L4 Linux SDK 开发手册
 
 > 文档版本：v0.3.0  
-> 最后更新：2026-06-15
+> 最后更新：2026-06-22
 
 本文档面向 Linux SDK 使用者，说明快速接入、常用工具和 API 示例的使用方法。
 
@@ -46,6 +46,10 @@ SDK 最小运行链路如下图所示：
 | `install/<arch>/bin/l4_basic_info` | 基础信息查询和最小验证程序。 |
 | `install/<arch>/lib/libar8030_client.so` | 客户端动态库。 |
 | `com/bb_api.h` | SDK 核心 API 头文件。 |
+| `com/prj_rpc.h` | `BB_GET_PRJ_DISPATCH` / `BB_SET_PRJ_DISPATCH` 二级命令结构体。 |
+| `app/ar8030/ar_net_api.h` | netdev 相关 API 头文件。 |
+
+当前精简 SDK 不包含原厂 `driver/linux/` 内核模块源码；该目录用于构建 `artosyn_drv.ko`，如需交付内核驱动，应单独迁移并按目标内核版本验证。
 
 `<arch>` 根据运行平台选择：
 
@@ -439,7 +443,9 @@ bb_ioctl()
 bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 ```
 
-示例程序默认连接本机 daemon，并打开第 0 个设备。详细 API 结构体和命令字说明可参考 `docs/api.md`。
+示例程序默认连接本机 daemon，并打开第 0 个设备。详细 API 结构体和命令字说明可参考 `com/bb_api.h`、`com/prj_rpc.h` 和 `app/ar8030/ar_net_api.h`。
+
+> 2026-06-22 同步说明：`bb_net_dev_create()`、`bb_net_dev_destroy()`、`bb_net_dev_buf_resize()` 已跟随新原厂 SDK 改为接收 `bb_dev_handle_t *`，由 SDK 内部打开和关闭 netdev 设备；旧版直接传入 netdev fd 的调用方式不再使用。
 
 ### 1、信息查询示例
 
@@ -1712,7 +1718,9 @@ reboot requested
 本文档只说明常用工具和示例的使用方式。完整 API 命令字、输入输出结构体和字段说明请参考：
 
 ```text
-L4_Linux_SDK/docs/api.md
+L4_Linux_SDK/com/bb_api.h
+L4_Linux_SDK/com/prj_rpc.h
+L4_Linux_SDK/app/ar8030/ar_net_api.h
 ```
 
 ### 6、常见问题速查

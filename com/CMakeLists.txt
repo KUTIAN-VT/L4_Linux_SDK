@@ -14,7 +14,7 @@ add_library(com STATIC ${file})
 
 if(NOT WIN32)
     target_compile_options(com PRIVATE "-fPIC")
-    install(FILES ../app/ar8030/ar_net_api.h DESTINATION DESTINATION include)
+    install(FILES ../app/ar8030/ar_net_api.h DESTINATION include)
 else()
     target_sources(com PRIVATE CrashDump.cpp)
     target_sources(com PRIVATE getopt/getopt.c getopt/getopt1.c)
