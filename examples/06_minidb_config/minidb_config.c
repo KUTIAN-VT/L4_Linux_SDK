@@ -42,6 +42,9 @@ typedef struct {
     int dev_index;
     action_t action;
     int reboot;
+    int remote;
+    int remote_slot;
+    int remote_slot_set;
     int slot;
     int role;
     int band;
@@ -65,6 +68,8 @@ static void usage(const char *prog)
     printf("  -a, --addr <addr>       daemon address, default: 127.0.0.1\n");
     printf("  -p, --port <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i, --index <index>     device index, default: 0\n");
+    printf("      --remote            operate peer device by remote ioctl, default remote slot: 0\n");
+    printf("      --remote-slot <n>   remote slot id for --remote, default: 0\n");
     printf("\n");
     printf("Query actions:\n");
     printf("  -A, --get-all           get role, AP MAC, slot 0 MAC, band, power and freq list\n");
@@ -114,6 +119,7 @@ static void init_options(options_t *opts)
     opts->addr = "127.0.0.1";
     opts->port = BB_PORT_DEFAULT;
     opts->dev_index = 0;
+    opts->remote_slot = 0;
     opts->slot = -1;
     opts->role = -1;
     opts->band = -1;
@@ -495,7 +501,68 @@ static uint32_t clamp_freq_num(uint32_t freq_num)
     return freq_num;
 }
 
-static int minidb_set_dispatch(bb_dev_handle_t *handle, uint8_t cmdid, const void *payload, size_t payload_size)
+static int minidb_ioctl(bb_dev_handle_t *handle,
+                         uint32_t request,
+                         const void *input,
+                         uint16_t input_len,
+                         void *output,
+                         uint16_t output_len,
+                         int remote_slot)
+{
+    bb_remote_ioctl_in_t remote_in;
+    bb_remote_ioctl_out_t remote_out;
+    int ret;
+
+    if (remote_slot < 0) {
+        return bb_ioctl(handle, request, input, output);
+    }
+
+    if ((input_len && !input) || input_len > sizeof(remote_in.data) ||
+        output_len > sizeof(remote_out.data)) {
+        printf("remote ioctl buffer invalid, request=0x%x in_len=%u out_len=%u\n",
+               request,
+               input_len,
+               output_len);
+        return -1;
+    }
+
+    memset(&remote_in, 0, sizeof(remote_in));
+    memset(&remote_out, 0, sizeof(remote_out));
+
+    if (input_len) {
+        memcpy(remote_in.data, input, input_len);
+    }
+
+    remote_in.len = input_len;
+    remote_in.slot = (uint8_t)remote_slot;
+    remote_in.msg_id = request;
+
+    ret = bb_ioctl(handle, BB_REMOTE_IOCTL_REQ, &remote_in, &remote_out);
+    if (ret) {
+        return ret;
+    }
+
+    if (output && output_len) {
+        memcpy(output, remote_out.data, output_len);
+    }
+
+    return 0;
+}
+
+static void print_minidb_title(const char *title, int remote_slot)
+{
+    if (remote_slot >= 0) {
+        printf("[%s remote slot=%d]\n", title, remote_slot);
+    } else {
+        printf("[%s]\n", title);
+    }
+}
+
+static int minidb_set_dispatch(bb_dev_handle_t *handle,
+                               uint8_t cmdid,
+                               const void *payload,
+                               size_t payload_size,
+                               int remote_slot)
 {
     bb_set_prj_dispatch_in_t request;
     prj_rpc_hdr_t *hdr;
@@ -514,7 +581,13 @@ static int minidb_set_dispatch(bb_dev_handle_t *handle, uint8_t cmdid, const voi
         memcpy(hdr->data, payload, payload_size);
     }
 
-    ret = bb_ioctl(handle, BB_SET_PRJ_DISPATCH, &request, NULL);
+    ret = minidb_ioctl(handle,
+                       BB_SET_PRJ_DISPATCH,
+                       &request,
+                       (uint16_t)sizeof(request),
+                       NULL,
+                       0,
+                       remote_slot);
     if (ret) {
         printf("BB_SET_PRJ_DISPATCH cmd=%u failed, ret=%d\n", cmdid, ret);
         return ret;
@@ -528,7 +601,8 @@ static int minidb_get_dispatch(bb_dev_handle_t *handle,
                                const void *input,
                                size_t input_size,
                                void *output,
-                               size_t output_size)
+                               size_t output_size,
+                               int remote_slot)
 {
     bb_get_prj_dispatch_in_t request;
     bb_get_prj_dispatch_out_t response;
@@ -550,7 +624,13 @@ static int minidb_get_dispatch(bb_dev_handle_t *handle,
         memcpy(hdr->data, input, input_size);
     }
 
-    ret = bb_ioctl(handle, BB_GET_PRJ_DISPATCH, &request, &response);
+    ret = minidb_ioctl(handle,
+                       BB_GET_PRJ_DISPATCH,
+                       &request,
+                       (uint16_t)sizeof(request),
+                       &response,
+                       (uint16_t)sizeof(response),
+                       remote_slot);
     if (ret == MINIDB_UNSET_RET) {
         return MINIDB_RET_UNSET;
     }
@@ -567,16 +647,16 @@ static int minidb_get_dispatch(bb_dev_handle_t *handle,
     return 0;
 }
 
-static int get_role(bb_dev_handle_t *handle, int compact)
+static int get_role(bb_dev_handle_t *handle, int compact, int remote_slot)
 {
     prj_cmd_get_role_t role;
-    int ret = minidb_get_dispatch(handle, PRJ_CMD_GET_ROLE, NULL, 0, &role, sizeof(role));
+    int ret = minidb_get_dispatch(handle, PRJ_CMD_GET_ROLE, NULL, 0, &role, sizeof(role), remote_slot);
 
     if (ret == MINIDB_RET_UNSET) {
         if (compact) {
             printf("role     : unset\n");
         } else {
-            printf("[PRJ_CMD_GET_ROLE]\n");
+            print_minidb_title("PRJ_CMD_GET_ROLE", remote_slot);
             printf("role=unset\n");
         }
         return 0;
@@ -589,7 +669,7 @@ static int get_role(bb_dev_handle_t *handle, int compact)
         if (compact) {
             printf("role     : unset\n");
         } else {
-            printf("[PRJ_CMD_GET_ROLE]\n");
+            print_minidb_title("PRJ_CMD_GET_ROLE", remote_slot);
             printf("role=unset\n");
         }
         return 0;
@@ -598,23 +678,23 @@ static int get_role(bb_dev_handle_t *handle, int compact)
     if (compact) {
         printf("role     : %s(%u)\n", role_name(role.role), role.role);
     } else {
-        printf("[PRJ_CMD_GET_ROLE]\n");
+        print_minidb_title("PRJ_CMD_GET_ROLE", remote_slot);
         printf("role=%s(%u)\n", role_name(role.role), role.role);
     }
 
     return 0;
 }
 
-static int get_ap_mac(bb_dev_handle_t *handle, int compact)
+static int get_ap_mac(bb_dev_handle_t *handle, int compact, int remote_slot)
 {
     prj_cmd_get_ap_mac_t mac;
-    int ret = minidb_get_dispatch(handle, PRJ_CMD_GET_AP_MAC, NULL, 0, &mac, sizeof(mac));
+    int ret = minidb_get_dispatch(handle, PRJ_CMD_GET_AP_MAC, NULL, 0, &mac, sizeof(mac), remote_slot);
 
     if (ret == MINIDB_RET_UNSET) {
         if (compact) {
             printf("ap_mac   : unset\n");
         } else {
-            printf("[PRJ_CMD_GET_AP_MAC]\n");
+            print_minidb_title("PRJ_CMD_GET_AP_MAC", remote_slot);
             printf("ap_mac=unset\n");
         }
         return 0;
@@ -626,7 +706,7 @@ static int get_ap_mac(bb_dev_handle_t *handle, int compact)
     if (compact) {
         printf("ap_mac   : ");
     } else {
-        printf("[PRJ_CMD_GET_AP_MAC]\n");
+        print_minidb_title("PRJ_CMD_GET_AP_MAC", remote_slot);
         printf("ap_mac=");
     }
     print_mac(&mac.ap_mac);
@@ -635,7 +715,7 @@ static int get_ap_mac(bb_dev_handle_t *handle, int compact)
     return 0;
 }
 
-static int get_slot_mac(bb_dev_handle_t *handle, int slot, int compact)
+static int get_slot_mac(bb_dev_handle_t *handle, int slot, int compact, int remote_slot)
 {
     prj_cmd_get_slot_mac_in_t input;
     prj_cmd_get_slot_mac_out_t output;
@@ -644,12 +724,12 @@ static int get_slot_mac(bb_dev_handle_t *handle, int slot, int compact)
     memset(&input, 0, sizeof(input));
     input.slot_id = (uint8_t)slot;
 
-    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_SLOT_MAC, &input, sizeof(input), &output, sizeof(output));
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_SLOT_MAC, &input, sizeof(input), &output, sizeof(output), remote_slot);
     if (ret == MINIDB_RET_UNSET) {
         if (compact) {
             printf("slot_mac%d: unset\n", slot);
         } else {
-            printf("[PRJ_CMD_GET_SLOT_MAC]\n");
+            print_minidb_title("PRJ_CMD_GET_SLOT_MAC", remote_slot);
             printf("slot=%d mac=unset\n", slot);
         }
         return 0;
@@ -661,7 +741,7 @@ static int get_slot_mac(bb_dev_handle_t *handle, int slot, int compact)
     if (compact) {
         printf("slot_mac%d: ", slot);
     } else {
-        printf("[PRJ_CMD_GET_SLOT_MAC]\n");
+        print_minidb_title("PRJ_CMD_GET_SLOT_MAC", remote_slot);
         printf("slot=%d mac=", slot);
     }
     print_mac(&output.mac);
@@ -669,16 +749,16 @@ static int get_slot_mac(bb_dev_handle_t *handle, int slot, int compact)
     return 0;
 }
 
-static int get_band(bb_dev_handle_t *handle, int compact)
+static int get_band(bb_dev_handle_t *handle, int compact, int remote_slot)
 {
     prj_cmd_get_band_t band;
-    int ret = minidb_get_dispatch(handle, PRJ_CMD_GET_BAND, NULL, 0, &band, sizeof(band));
+    int ret = minidb_get_dispatch(handle, PRJ_CMD_GET_BAND, NULL, 0, &band, sizeof(band), remote_slot);
 
     if (ret == MINIDB_RET_UNSET) {
         if (compact) {
             printf("band     : unset\n");
         } else {
-            printf("[PRJ_CMD_GET_BAND]\n");
+            print_minidb_title("PRJ_CMD_GET_BAND", remote_slot);
             printf("band=unset\n");
         }
         return 0;
@@ -690,23 +770,23 @@ static int get_band(bb_dev_handle_t *handle, int compact)
     if (compact) {
         printf("band     : %s(0x%02x)\n", band_bitmap_name(band.band_bmp), band.band_bmp);
     } else {
-        printf("[PRJ_CMD_GET_BAND]\n");
+        print_minidb_title("PRJ_CMD_GET_BAND", remote_slot);
         printf("band=%s(0x%02x)\n", band_bitmap_name(band.band_bmp), band.band_bmp);
     }
 
     return 0;
 }
 
-static int get_pwr(bb_dev_handle_t *handle, int compact)
+static int get_pwr(bb_dev_handle_t *handle, int compact, int remote_slot)
 {
     bb_phy_pwr_basic_t pwr;
-    int ret = minidb_get_dispatch(handle, PRJ_CMD_GET_PWR, NULL, 0, &pwr, sizeof(pwr));
+    int ret = minidb_get_dispatch(handle, PRJ_CMD_GET_PWR, NULL, 0, &pwr, sizeof(pwr), remote_slot);
 
     if (ret == MINIDB_RET_UNSET) {
         if (compact) {
             printf("power    : unset\n");
         } else {
-            printf("[PRJ_CMD_GET_PWR]\n");
+            print_minidb_title("PRJ_CMD_GET_PWR", remote_slot);
             printf("power=unset\n");
         }
         return 0;
@@ -722,7 +802,7 @@ static int get_pwr(bb_dev_handle_t *handle, int compact)
             printf("power    : fixed init=%u dBm\n", pwr.pwr_init);
         }
     } else {
-        printf("[PRJ_CMD_GET_PWR]\n");
+        print_minidb_title("PRJ_CMD_GET_PWR", remote_slot);
         printf("pwr_auto=%s(%u)\n", pwr_auto_name(pwr.pwr_auto), pwr.pwr_auto);
         if (pwr.pwr_auto) {
             printf("pwr_min=%u dBm\n", pwr.pwr_min);
@@ -735,19 +815,19 @@ static int get_pwr(bb_dev_handle_t *handle, int compact)
     return 0;
 }
 
-static int get_freq_list(bb_dev_handle_t *handle, int compact)
+static int get_freq_list(bb_dev_handle_t *handle, int compact, int remote_slot)
 {
     prj_cmd_get_freq_list_t freq_list;
     uint32_t freq_num;
     int ret;
 
     memset(&freq_list, 0, sizeof(freq_list));
-    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_FREQ_LIST, NULL, 0, &freq_list, sizeof(freq_list));
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_FREQ_LIST, NULL, 0, &freq_list, sizeof(freq_list), remote_slot);
     if (ret == MINIDB_RET_UNSET) {
         if (compact) {
             printf("freq_list: unset\n");
         } else {
-            printf("[PRJ_CMD_GET_FREQ_LIST]\n");
+            print_minidb_title("PRJ_CMD_GET_FREQ_LIST", remote_slot);
             printf("freq_list=unset\n");
         }
         return 0;
@@ -767,7 +847,7 @@ static int get_freq_list(bb_dev_handle_t *handle, int compact)
         }
         printf("\n");
     } else {
-        printf("[PRJ_CMD_GET_FREQ_LIST]\n");
+        print_minidb_title("PRJ_CMD_GET_FREQ_LIST", remote_slot);
         printf("freq_num=%u\n", freq_list.freq_num);
         printf("freq_mhz=");
         print_freq_list_mhz(freq_list.freq, freq_num);
@@ -780,22 +860,22 @@ static int get_freq_list(bb_dev_handle_t *handle, int compact)
     return 0;
 }
 
-static int get_all(bb_dev_handle_t *handle)
+static int get_all(bb_dev_handle_t *handle, int remote_slot)
 {
     int ret = 0;
 
-    printf("[MiniDB]\n");
-    ret |= get_role(handle, 1);
-    ret |= get_ap_mac(handle, 1);
-    ret |= get_slot_mac(handle, 0, 1);
-    ret |= get_band(handle, 1);
-    ret |= get_pwr(handle, 1);
-    ret |= get_freq_list(handle, 1);
+    print_minidb_title("MiniDB", remote_slot);
+    ret |= get_role(handle, 1, remote_slot);
+    ret |= get_ap_mac(handle, 1, remote_slot);
+    ret |= get_slot_mac(handle, 0, 1, remote_slot);
+    ret |= get_band(handle, 1, remote_slot);
+    ret |= get_pwr(handle, 1, remote_slot);
+    ret |= get_freq_list(handle, 1, remote_slot);
 
     return ret ? -1 : 0;
 }
 
-static int set_role(bb_dev_handle_t *handle, int role)
+static int set_role(bb_dev_handle_t *handle, int role, int remote_slot)
 {
     prj_cmd_set_role_t payload;
     int ret;
@@ -803,18 +883,18 @@ static int set_role(bb_dev_handle_t *handle, int role)
     memset(&payload, 0, sizeof(payload));
     payload.role = (uint8_t)role;
 
-    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_ROLE, &payload, sizeof(payload));
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_ROLE, &payload, sizeof(payload), remote_slot);
     if (ret) {
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_ROLE]\n");
+    print_minidb_title("PRJ_CMD_SET_ROLE", remote_slot);
     printf("role=%s(%u)\n", role_name(payload.role), payload.role);
     printf("set minidb role ok\n");
     return 0;
 }
 
-static int set_ap_mac(bb_dev_handle_t *handle, const bb_mac_t *mac)
+static int set_ap_mac(bb_dev_handle_t *handle, const bb_mac_t *mac, int remote_slot)
 {
     prj_cmd_set_ap_mac_t payload;
     int ret;
@@ -822,12 +902,12 @@ static int set_ap_mac(bb_dev_handle_t *handle, const bb_mac_t *mac)
     memset(&payload, 0, sizeof(payload));
     payload.ap_mac = *mac;
 
-    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_AP_MAC, &payload, sizeof(payload));
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_AP_MAC, &payload, sizeof(payload), remote_slot);
     if (ret) {
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_AP_MAC]\n");
+    print_minidb_title("PRJ_CMD_SET_AP_MAC", remote_slot);
     printf("ap_mac=");
     print_mac(&payload.ap_mac);
     printf("\n");
@@ -835,7 +915,7 @@ static int set_ap_mac(bb_dev_handle_t *handle, const bb_mac_t *mac)
     return 0;
 }
 
-static int set_slot_mac(bb_dev_handle_t *handle, int slot, const bb_mac_t *mac)
+static int set_slot_mac(bb_dev_handle_t *handle, int slot, const bb_mac_t *mac, int remote_slot)
 {
     prj_cmd_set_slot_mac_t payload;
     int ret;
@@ -844,12 +924,12 @@ static int set_slot_mac(bb_dev_handle_t *handle, int slot, const bb_mac_t *mac)
     payload.slot_id = (uint8_t)slot;
     payload.slot_mac = *mac;
 
-    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_SLOT_MAC, &payload, sizeof(payload));
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_SLOT_MAC, &payload, sizeof(payload), remote_slot);
     if (ret) {
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_SLOT_MAC]\n");
+    print_minidb_title("PRJ_CMD_SET_SLOT_MAC", remote_slot);
     printf("slot=%u mac=", payload.slot_id);
     print_mac(&payload.slot_mac);
     printf("\n");
@@ -857,7 +937,7 @@ static int set_slot_mac(bb_dev_handle_t *handle, int slot, const bb_mac_t *mac)
     return 0;
 }
 
-static int set_band(bb_dev_handle_t *handle, int band)
+static int set_band(bb_dev_handle_t *handle, int band, int remote_slot)
 {
     prj_cmd_set_band_t payload;
     int ret;
@@ -865,24 +945,24 @@ static int set_band(bb_dev_handle_t *handle, int band)
     memset(&payload, 0, sizeof(payload));
     payload.band_bmp = (uint8_t)band;
 
-    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_BAND, &payload, sizeof(payload));
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_BAND, &payload, sizeof(payload), remote_slot);
     if (ret) {
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_BAND]\n");
+    print_minidb_title("PRJ_CMD_SET_BAND", remote_slot);
     printf("band=%s(0x%02x)\n", band_bitmap_name(payload.band_bmp), payload.band_bmp);
     printf("set minidb band ok\n");
     return 0;
 }
 
-static int set_pwr(bb_dev_handle_t *handle, const options_t *opts)
+static int set_pwr(bb_dev_handle_t *handle, const options_t *opts, int remote_slot)
 {
     bb_phy_pwr_basic_t payload;
     int ret;
 
     memset(&payload, 0, sizeof(payload));
-    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_PWR, NULL, 0, &payload, sizeof(payload));
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_PWR, NULL, 0, &payload, sizeof(payload), remote_slot);
     if (ret == MINIDB_RET_UNSET) {
         memset(&payload, 0, sizeof(payload));
     } else if (ret) {
@@ -900,12 +980,12 @@ static int set_pwr(bb_dev_handle_t *handle, const options_t *opts)
         payload.pwr_max = payload.pwr_init;
     }
 
-    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_PWR, &payload, sizeof(payload));
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_PWR, &payload, sizeof(payload), remote_slot);
     if (ret) {
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_PWR]\n");
+    print_minidb_title("PRJ_CMD_SET_PWR", remote_slot);
     printf("pwr_auto=%s(%u)\n", pwr_auto_name(payload.pwr_auto), payload.pwr_auto);
     if (payload.pwr_auto) {
         printf("pwr_min=%u dBm\n", payload.pwr_min);
@@ -917,7 +997,7 @@ static int set_pwr(bb_dev_handle_t *handle, const options_t *opts)
     return 0;
 }
 
-static int set_freq_list(bb_dev_handle_t *handle, const options_t *opts)
+static int set_freq_list(bb_dev_handle_t *handle, const options_t *opts, int remote_slot)
 {
     prj_cmd_set_freq_list_t payload;
     int ret;
@@ -926,12 +1006,12 @@ static int set_freq_list(bb_dev_handle_t *handle, const options_t *opts)
     payload.freq_num = opts->freq_num;
     memcpy(payload.freq, opts->freq, opts->freq_num * sizeof(opts->freq[0]));
 
-    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_FREQ_LIST, &payload, sizeof(payload));
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_FREQ_LIST, &payload, sizeof(payload), remote_slot);
     if (ret) {
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_FREQ_LIST]\n");
+    print_minidb_title("PRJ_CMD_SET_FREQ_LIST", remote_slot);
     printf("freq_num=%u\n", payload.freq_num);
     printf("freq_mhz=");
     print_freq_list_mhz(payload.freq, payload.freq_num);
@@ -955,7 +1035,7 @@ static void init_uart2_default_config(prj_cmd_set_uart_t *payload)
     payload->rx_buff_size = 0;
 }
 
-static int read_uart2_minidb_config(bb_dev_handle_t *handle, prj_cmd_set_uart_t *payload)
+static int read_uart2_minidb_config(bb_dev_handle_t *handle, prj_cmd_set_uart_t *payload, int remote_slot)
 {
     prj_cmd_get_uart_in_t input;
     int ret;
@@ -964,7 +1044,7 @@ static int read_uart2_minidb_config(bb_dev_handle_t *handle, prj_cmd_set_uart_t 
     input.id = UART_BAUDRATE_CONFIG_ID;
     input.running = 0;
 
-    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_UART, &input, sizeof(input), payload, sizeof(*payload));
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_UART, &input, sizeof(input), payload, sizeof(*payload), remote_slot);
     if (ret == MINIDB_RET_UNSET) {
         init_uart2_default_config(payload);
         return 0;
@@ -978,7 +1058,7 @@ static int read_uart2_minidb_config(bb_dev_handle_t *handle, prj_cmd_set_uart_t 
     return 0;
 }
 
-static int get_uart_baudrate(bb_dev_handle_t *handle)
+static int get_uart_baudrate(bb_dev_handle_t *handle, int remote_slot)
 {
     prj_cmd_get_uart_in_t input;
     prj_cmd_get_uart_out_t output;
@@ -989,8 +1069,8 @@ static int get_uart_baudrate(bb_dev_handle_t *handle)
     input.id = UART_BAUDRATE_CONFIG_ID;
     input.running = 0;
 
-    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_UART, &input, sizeof(input), &output, sizeof(output));
-    printf("[PRJ_CMD_GET_UART]\n");
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_UART, &input, sizeof(input), &output, sizeof(output), remote_slot);
+    print_minidb_title("PRJ_CMD_GET_UART", remote_slot);
     printf("id=%u\n", UART_BAUDRATE_CONFIG_ID);
     if (ret == MINIDB_RET_UNSET) {
         printf("uart2_baudrate=unset\n");
@@ -1004,12 +1084,12 @@ static int get_uart_baudrate(bb_dev_handle_t *handle)
     return 0;
 }
 
-static int set_uart_baudrate(bb_dev_handle_t *handle, uint32_t baudrate)
+static int set_uart_baudrate(bb_dev_handle_t *handle, uint32_t baudrate, int remote_slot)
 {
     prj_cmd_set_uart_t payload;
     int ret;
 
-    ret = read_uart2_minidb_config(handle, &payload);
+    ret = read_uart2_minidb_config(handle, &payload, remote_slot);
     if (ret) {
         return ret;
     }
@@ -1018,12 +1098,12 @@ static int set_uart_baudrate(bb_dev_handle_t *handle, uint32_t baudrate)
     payload.apply = 0;
     payload.baudrate = baudrate;
 
-    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_UART, &payload, sizeof(payload));
+    ret = minidb_set_dispatch(handle, PRJ_CMD_SET_UART, &payload, sizeof(payload), remote_slot);
     if (ret) {
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_UART]\n");
+    print_minidb_title("PRJ_CMD_SET_UART", remote_slot);
     printf("id=%u\n", payload.id);
     printf("uart2_baudrate=%u\n", payload.baudrate);
     printf("set minidb UART2 baudrate ok\n");
@@ -1031,20 +1111,20 @@ static int set_uart_baudrate(bb_dev_handle_t *handle, uint32_t baudrate)
 }
 
 
-static int reset_minidb(bb_dev_handle_t *handle)
+static int reset_minidb(bb_dev_handle_t *handle, int remote_slot)
 {
-    int ret = minidb_set_dispatch(handle, PRJ_CMD_SET_RESET_DB, NULL, 0);
+    int ret = minidb_set_dispatch(handle, PRJ_CMD_SET_RESET_DB, NULL, 0, remote_slot);
 
     if (ret) {
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_RESET_DB]\n");
+    print_minidb_title("PRJ_CMD_SET_RESET_DB", remote_slot);
     printf("reset minidb ok\n");
     return 0;
 }
 
-static int reboot_device(bb_dev_handle_t *handle)
+static int reboot_device(bb_dev_handle_t *handle, int remote_slot)
 {
     bb_set_reboot_t reboot;
     int ret;
@@ -1052,13 +1132,19 @@ static int reboot_device(bb_dev_handle_t *handle)
     memset(&reboot, 0, sizeof(reboot));
     reboot.tim_ms = 0;
 
-    ret = bb_ioctl(handle, BB_SET_SYS_REBOOT, &reboot, NULL);
+    ret = minidb_ioctl(handle,
+                       BB_SET_SYS_REBOOT,
+                       &reboot,
+                       (uint16_t)sizeof(reboot),
+                       NULL,
+                       0,
+                       remote_slot);
     if (ret) {
         printf("BB_SET_SYS_REBOOT failed, ret=%d\n", ret);
         return ret;
     }
 
-    printf("[BB_SET_SYS_REBOOT]\n");
+    print_minidb_title("BB_SET_SYS_REBOOT", remote_slot);
     printf("reboot requested\n");
     return 0;
 }
@@ -1087,6 +1173,8 @@ static int parse_options(int argc, char **argv, options_t *opts)
         OPT_PORT,
         OPT_INDEX,
         OPT_HELP,
+        OPT_REMOTE,
+        OPT_REMOTE_SLOT,
     };
 
     static const struct option long_options[] = {
@@ -1111,6 +1199,8 @@ static int parse_options(int argc, char **argv, options_t *opts)
         {"port", required_argument, NULL, OPT_PORT},
         {"index", required_argument, NULL, OPT_INDEX},
         {"help", no_argument, NULL, OPT_HELP},
+        {"remote", no_argument, NULL, OPT_REMOTE},
+        {"remote-slot", required_argument, NULL, OPT_REMOTE_SLOT},
         {NULL, 0, NULL, 0},
     };
 
@@ -1139,6 +1229,15 @@ static int parse_options(int argc, char **argv, options_t *opts)
             if (parse_int_range(optarg, 0, 255, "index", &opts->dev_index)) {
                 return -1;
             }
+            break;
+        case OPT_REMOTE:
+            opts->remote = 1;
+            break;
+        case OPT_REMOTE_SLOT:
+            if (parse_int_range(optarg, 0, 255, "remote slot", &opts->remote_slot)) {
+                return -1;
+            }
+            opts->remote_slot_set = 1;
             break;
         case 'A':
         case OPT_GET_ALL:
@@ -1266,6 +1365,11 @@ static int parse_options(int argc, char **argv, options_t *opts)
         return -1;
     }
 
+    if (opts->remote_slot_set && !opts->remote) {
+        printf("--remote-slot is only valid with --remote\n");
+        return -1;
+    }
+
     if (opts->reboot) {
         if (opts->action == ACTION_NONE) {
             opts->action = ACTION_REBOOT;
@@ -1292,41 +1396,43 @@ static int parse_options(int argc, char **argv, options_t *opts)
 
 static int run_action(bb_dev_handle_t *handle, const options_t *opts)
 {
+    int remote_slot = opts->remote ? opts->remote_slot : -1;
+
     switch (opts->action) {
     case ACTION_GET_ALL:
-        return get_all(handle);
+        return get_all(handle, remote_slot);
     case ACTION_GET_ROLE:
-        return get_role(handle, 0);
+        return get_role(handle, 0, remote_slot);
     case ACTION_GET_AP_MAC:
-        return get_ap_mac(handle, 0);
+        return get_ap_mac(handle, 0, remote_slot);
     case ACTION_GET_SLOT_MAC:
-        return get_slot_mac(handle, opts->slot, 0);
+        return get_slot_mac(handle, opts->slot, 0, remote_slot);
     case ACTION_GET_BAND:
-        return get_band(handle, 0);
+        return get_band(handle, 0, remote_slot);
     case ACTION_GET_PWR:
-        return get_pwr(handle, 0);
+        return get_pwr(handle, 0, remote_slot);
     case ACTION_GET_FREQ_LIST:
-        return get_freq_list(handle, 0);
+        return get_freq_list(handle, 0, remote_slot);
     case ACTION_GET_UART_BAUDRATE:
-        return get_uart_baudrate(handle);
+        return get_uart_baudrate(handle, remote_slot);
     case ACTION_SET_ROLE:
-        return set_role(handle, opts->role);
+        return set_role(handle, opts->role, remote_slot);
     case ACTION_SET_AP_MAC:
-        return set_ap_mac(handle, &opts->mac);
+        return set_ap_mac(handle, &opts->mac, remote_slot);
     case ACTION_SET_SLOT_MAC:
-        return set_slot_mac(handle, opts->slot, &opts->mac);
+        return set_slot_mac(handle, opts->slot, &opts->mac, remote_slot);
     case ACTION_SET_BAND:
-        return set_band(handle, opts->band);
+        return set_band(handle, opts->band, remote_slot);
     case ACTION_SET_PWR:
-        return set_pwr(handle, opts);
+        return set_pwr(handle, opts, remote_slot);
     case ACTION_SET_FREQ_LIST:
-        return set_freq_list(handle, opts);
+        return set_freq_list(handle, opts, remote_slot);
     case ACTION_SET_UART_BAUDRATE:
-        return set_uart_baudrate(handle, opts->uart_baudrate);
+        return set_uart_baudrate(handle, opts->uart_baudrate, remote_slot);
     case ACTION_RESET:
-        return reset_minidb(handle);
+        return reset_minidb(handle, remote_slot);
     case ACTION_REBOOT:
-        return reboot_device(handle);
+        return reboot_device(handle, remote_slot);
     default:
         return -1;
     }
@@ -1353,7 +1459,7 @@ int main(int argc, char **argv)
 
     ret = run_action(ctx.handle, &opts);
     if (!ret && opts.reboot && opts.action != ACTION_REBOOT) {
-        ret = reboot_device(ctx.handle);
+        ret = reboot_device(ctx.handle, opts.remote ? opts.remote_slot : -1);
     }
 
     bb_demo_close(&ctx);

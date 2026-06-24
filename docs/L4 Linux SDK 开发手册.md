@@ -1187,7 +1187,7 @@ mode=0
 
 ### 5、配置文件管理示例
 
-`l4_config_file` 用于导出、写入和恢复设备配置文件。该示例演示 `BB_GET_CFG`、`BB_SET_CFG` 和 `BB_RESET_CFG` 的分片调用流程。
+`l4_config_file` 用于导出、写入和恢复设备配置文件。该示例演示 `BB_GET_CFG`、`BB_SET_CFG` 和 `BB_RESET_CFG` 的分片调用流程，并支持通过 `BB_REMOTE_IOCTL_REQ` 操作对端设备，远程模式默认 slot 为 0。
 
 #### 5.1 程序参数说明
 
@@ -1196,9 +1196,11 @@ mode=0
 | `-g <file>` | 调用 `BB_GET_CFG`，导出配置到本地文件 | 不执行 |
 | `-s <file>` | 调用 `BB_SET_CFG`，把本地文件写入设备 | 不执行 |
 | `-r` | 调用 `BB_RESET_CFG`，恢复设备配置 | 不执行 |
+| `-R` | 通过远程 ioctl 操作对端设备 | 本机操作 |
+| `-S <slot>` | 指定 `-R` 使用的 remote slot | `0` |
 | `-m <mode>` | `BB_GET_CFG` 读取模式，支持 `auto`、`memory`、`flash` 或 `0`、`1`、`2` | `auto` |
 
-`-g`、`-s`、`-r` 三个动作必须且只能指定一个，避免一次命令同时执行多个配置文件操作。
+`-g`、`-s`、`-r` 三个动作必须且只能指定一个，避免一次命令同时执行多个配置文件操作。`-R` 只改变执行端，`-S` 只能和 `-R` 一起使用。
 
 #### 5.2 示例
 
@@ -1226,12 +1228,36 @@ mode=0
 ./l4_config_file -r
 ```
 
-导出时，程序会校验设备返回的 `total_length` 和 `total_crc16`；写入时，程序会先计算本地文件 CRC，再按 `bb_set_cfg_t.data` 最大长度分片下发。
+远程导出对端 slot 0 配置文件：
+
+```sh
+./l4_config_file -R -g peer_cfg.json
+```
+
+远程写入对端 slot 0 配置文件：
+
+```sh
+./l4_config_file -R -s cfg.json
+```
+
+远程恢复对端 slot 0 配置文件：
+
+```sh
+./l4_config_file -R -r
+```
+
+远程导出指定 slot 的 flash 配置文件：
+
+```sh
+./l4_config_file -R -S 1 -m flash -g peer_slot1_flash_cfg.json
+```
+
+导出时，程序会校验设备返回的 `total_length` 和 `total_crc16`；写入时，程序会先计算本地文件 CRC，再按 `bb_set_cfg_t.data` 最大长度分片下发。远程执行时标题会显示 `remote slot=<slot>`。
 
 
 ### 6、MiniDB 配置示例
 
-`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段和功率等配置项。
+`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段和功率等配置项。增加 `--remote` 后，查询、写入、重置和重启会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行，默认 remote slot 为 0。
 
 MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 MiniDB 后，配置需要重启设备后才生效；建议设置或重置后使用 `-H` 重启设备，重启完成后再查询确认。
 
@@ -1254,8 +1280,10 @@ MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 
 | `-U <baudrate>` | `--set-uart-baudrate <baudrate>` | 设置 MiniDB UART2 波特率 | 不执行 |
 | `-D` | `--reset` | 重置 MiniDB | 不执行 |
 | `-H` | `--reboot` | 单独重启设备，或设置/重置成功后重启设备 | 不执行 |
+| 无 | `--remote` | 通过远程 ioctl 操作对端设备 | 本机操作 |
+| 无 | `--remote-slot <slot>` | 指定 `--remote` 使用的 remote slot | `0` |
 
-每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`-H` 可以单独作为重启动作，也可以附加在设置或重置动作后；`-H` 不能和查询动作组合。
+每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`--remote` 只改变命令实际执行端，`--remote-slot` 只能和 `--remote` 一起使用；不新增远程短参数，因为 `-R` 已是 `--set-role`，`-S` 已是 `--set-slot-mac`。`-H` 可以单独作为重启动作，也可以附加在设置或重置动作后；`-H` 不能和查询动作组合。带 `--remote` 时，查询、写入、重置和重启都在对端执行。
 
 #### 6.2 输入格式
 
@@ -1286,7 +1314,43 @@ UART 波特率配置固定操作 UART2。`-U <baudrate>` 只修改 MiniDB 中 UA
 
 #### 6.3 示例
 
-以下示例按“先设置，再查询确认”的顺序组织。由于程序每次运行只允许一个主动作，设置和查询需要分两次执行；如果需要确认设备运行态是否生效，设置后先使用 `-H` 重启设备，重启完成后再查询。
+以下示例按“先设置，再查询确认”的顺序组织。由于程序每次运行只允许一个主动作，设置和查询需要分两次执行；如果需要确认设备运行态是否生效，设置后先使用 `-H` 重启设备，重启完成后再查询。远程操作时在命令中增加 `--remote`，非默认对端使用 `--remote-slot <slot>`。
+
+远程查询对端全部 MiniDB 信息：
+
+```sh
+./l4_minidb_config --remote -A
+```
+
+远程写入对端 MiniDB role：
+
+```sh
+./l4_minidb_config --remote -R ap
+```
+
+远程写入对端 slot MAC：
+
+```sh
+./l4_minidb_config --remote -S 1,11:22:33:44
+```
+
+远程重置对端 MiniDB：
+
+```sh
+./l4_minidb_config --remote -D
+```
+
+远程重启对端设备：
+
+```sh
+./l4_minidb_config --remote -H
+```
+
+远程操作指定 remote slot，并在写入成功后重启对端：
+
+```sh
+./l4_minidb_config --remote --remote-slot 1 -B auto -H
+```
 
 ##### 6.3.1 设置 role 为 AP 后查询
 
