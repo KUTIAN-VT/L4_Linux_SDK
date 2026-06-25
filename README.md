@@ -4,6 +4,9 @@
 
 本仓库当前维护的是整理后的 Linux SDK 内容。`build/` 和 `install/` 是构建、安装输出，不应作为源码维护。
 
+> ## 📖 [L4 Linux SDK 开发手册](docs/L4%20Linux%20SDK%20开发手册.md)
+> 点击上方链接查看完整开发手册，涵盖 SDK 编译使用、API 接口说明、应用工具和调试指南。
+
 ## 运行链路
 
 SDK 的最小运行链路如下：
@@ -273,7 +276,7 @@ cmake --install L4_Linux_SDK/build/arm64
 
 ## 下一步阅读
 
-- 第一次使用 SDK：阅读 `docs/L4 Linux SDK 开发手册.md` 的“SDK 编译使用”和“最快验证”章节。
+- 第一次使用 SDK：阅读 [L4 Linux SDK 开发手册](docs/L4%20Linux%20SDK%20开发手册.md) 的”SDK 编译使用”和”最快验证”章节。
 - 开发自己的应用：先看 `examples/01_basic_info` 和 `examples/00_common`，理解连接 daemon、枚举设备、打开设备和调用 `bb_ioctl()` 的最小流程。
 - 查 API 结构体和命令字：查看 `com/bb_api.h`，并结合 `examples/` 中对应示例理解调用方式。
 - 使用应用工具：阅读开发手册中的“应用工具”章节。
