@@ -834,6 +834,7 @@ static int _reg_usbrpc_platfrom(rpc_info* prpc, dev8030_act* pact)
     }
 
     usbrpc_ctrl* ctrl = malloc(sizeof(usbrpc_ctrl));
+    memset(ctrl, 0, sizeof(usbrpc_ctrl));
     ctrl->pusbctx     = pusbctx;
     rpc_dev_add(prpc, &ctrl->basedev);
 

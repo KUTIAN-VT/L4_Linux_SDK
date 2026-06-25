@@ -1,7 +1,7 @@
 # L4 Linux SDK 开发手册
 
 > 文档版本：v0.3.0  
-> 最后更新：2026-06-15
+> 最后更新：2026-06-22
 
 本文档面向 Linux SDK 使用者，说明快速接入、常用工具和 API 示例的使用方法。
 
@@ -46,6 +46,10 @@ SDK 最小运行链路如下图所示：
 | `install/<arch>/bin/l4_basic_info` | 基础信息查询和最小验证程序。 |
 | `install/<arch>/lib/libar8030_client.so` | 客户端动态库。 |
 | `com/bb_api.h` | SDK 核心 API 头文件。 |
+| `com/prj_rpc.h` | `BB_GET_PRJ_DISPATCH` / `BB_SET_PRJ_DISPATCH` 二级命令结构体。 |
+| `app/ar8030/ar_net_api.h` | netdev 相关 API 头文件。 |
+
+当前精简 SDK 不包含原厂 `driver/linux/` 内核模块源码；该目录用于构建 `artosyn_drv.ko`，如需交付内核驱动，应单独迁移并按目标内核版本验证。
 
 `<arch>` 根据运行平台选择：
 
@@ -439,7 +443,9 @@ bb_ioctl()
 bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 ```
 
-示例程序默认连接本机 daemon，并打开第 0 个设备。详细 API 结构体和命令字说明可参考 `docs/api.md`。
+示例程序默认连接本机 daemon，并打开第 0 个设备。详细 API 结构体和命令字说明可参考 `com/bb_api.h`、`com/prj_rpc.h` 和 `app/ar8030/ar_net_api.h`。
+
+> 2026-06-22 同步说明：`bb_net_dev_create()`、`bb_net_dev_destroy()`、`bb_net_dev_buf_resize()` 已跟随新原厂 SDK 改为接收 `bb_dev_handle_t *`，由 SDK 内部打开和关闭 netdev 设备；旧版直接传入 netdev fd 的调用方式不再使用。
 
 ### 1、信息查询示例
 
@@ -1181,7 +1187,7 @@ mode=0
 
 ### 5、配置文件管理示例
 
-`l4_config_file` 用于导出、写入和恢复设备配置文件。该示例演示 `BB_GET_CFG`、`BB_SET_CFG` 和 `BB_RESET_CFG` 的分片调用流程。
+`l4_config_file` 用于导出、写入和恢复设备配置文件。该示例演示 `BB_GET_CFG`、`BB_SET_CFG` 和 `BB_RESET_CFG` 的分片调用流程，并支持通过 `BB_REMOTE_IOCTL_REQ` 操作对端设备，远程模式默认 slot 为 0。
 
 #### 5.1 程序参数说明
 
@@ -1190,9 +1196,11 @@ mode=0
 | `-g <file>` | 调用 `BB_GET_CFG`，导出配置到本地文件 | 不执行 |
 | `-s <file>` | 调用 `BB_SET_CFG`，把本地文件写入设备 | 不执行 |
 | `-r` | 调用 `BB_RESET_CFG`，恢复设备配置 | 不执行 |
+| `-R` | 通过远程 ioctl 操作对端设备 | 本机操作 |
+| `-S <slot>` | 指定 `-R` 使用的 remote slot | `0` |
 | `-m <mode>` | `BB_GET_CFG` 读取模式，支持 `auto`、`memory`、`flash` 或 `0`、`1`、`2` | `auto` |
 
-`-g`、`-s`、`-r` 三个动作必须且只能指定一个，避免一次命令同时执行多个配置文件操作。
+`-g`、`-s`、`-r` 三个动作必须且只能指定一个，避免一次命令同时执行多个配置文件操作。`-R` 只改变执行端，`-S` 只能和 `-R` 一起使用。
 
 #### 5.2 示例
 
@@ -1220,12 +1228,36 @@ mode=0
 ./l4_config_file -r
 ```
 
-导出时，程序会校验设备返回的 `total_length` 和 `total_crc16`；写入时，程序会先计算本地文件 CRC，再按 `bb_set_cfg_t.data` 最大长度分片下发。
+远程导出对端 slot 0 配置文件：
+
+```sh
+./l4_config_file -R -g peer_cfg.json
+```
+
+远程写入对端 slot 0 配置文件：
+
+```sh
+./l4_config_file -R -s cfg.json
+```
+
+远程恢复对端 slot 0 配置文件：
+
+```sh
+./l4_config_file -R -r
+```
+
+远程导出指定 slot 的 flash 配置文件：
+
+```sh
+./l4_config_file -R -S 1 -m flash -g peer_slot1_flash_cfg.json
+```
+
+导出时，程序会校验设备返回的 `total_length` 和 `total_crc16`；写入时，程序会先计算本地文件 CRC，再按 `bb_set_cfg_t.data` 最大长度分片下发。远程执行时标题会显示 `remote slot=<slot>`。
 
 
 ### 6、MiniDB 配置示例
 
-`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段和功率等配置项。
+`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段和功率等配置项。增加 `--remote` 后，查询、写入、重置和重启会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行，默认 remote slot 为 0。
 
 MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 MiniDB 后，配置需要重启设备后才生效；建议设置或重置后使用 `-H` 重启设备，重启完成后再查询确认。
 
@@ -1239,15 +1271,19 @@ MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 
 | `-s [slot]` | `--get-slot-mac[=slot]` | 查询 MiniDB 中保存的 slot MAC | slot 0 |
 | `-b` | `--get-band` | 查询 MiniDB 中保存的 band bitmap | 不执行 |
 | `-w` | `--get-pwr` | 查询 MiniDB 中保存的 power 配置 | 不执行 |
+| `-u` | `--get-uart-baudrate` | 查询 MiniDB 中保存的 UART2 波特率 | 不执行 |
 | `-R <ap|dev|0|1>` | `--set-role <...>` | 设置 MiniDB role | 不执行 |
 | `-M <mac>` | `--set-ap-mac <mac>` | 设置 MiniDB AP MAC | 不执行 |
 | `-S <mac|slot,mac>` | `--set-slot-mac <mac|slot,mac>` | 设置 MiniDB slot MAC | slot 0 |
 | `-B <auto|2g|5g|bitmap>` | `--set-band <...>` | 设置 MiniDB band bitmap | 不执行 |
 | `-W <pwr|min,max>` | `--set-pwr <...>` | 设置 MiniDB 固定功率或功率自适应区间 | 不执行 |
+| `-U <baudrate>` | `--set-uart-baudrate <baudrate>` | 设置 MiniDB UART2 波特率 | 不执行 |
 | `-D` | `--reset` | 重置 MiniDB | 不执行 |
 | `-H` | `--reboot` | 单独重启设备，或设置/重置成功后重启设备 | 不执行 |
+| 无 | `--remote` | 通过远程 ioctl 操作对端设备 | 本机操作 |
+| 无 | `--remote-slot <slot>` | 指定 `--remote` 使用的 remote slot | `0` |
 
-每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`-H` 可以单独作为重启动作，也可以附加在设置或重置动作后；`-H` 不能和查询动作组合。
+每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`--remote` 只改变命令实际执行端，`--remote-slot` 只能和 `--remote` 一起使用；不新增远程短参数，因为 `-R` 已是 `--set-role`，`-S` 已是 `--set-slot-mac`。`-H` 可以单独作为重启动作，也可以附加在设置或重置动作后；`-H` 不能和查询动作组合。带 `--remote` 时，查询、写入、重置和重启都在对端执行。
 
 #### 6.2 输入格式
 
@@ -1274,9 +1310,47 @@ band bitmap 支持名称和数值：
 | `-W 20` | 设置固定功率，写入 `pwr_auto=0`、`pwr_init=20` |
 | `-W 10,27` | 设置自适应功率区间，写入 `pwr_auto=1`、`pwr_min=10`、`pwr_max=27` |
 
+UART 波特率配置固定操作 UART2。`-U <baudrate>` 只修改 MiniDB 中 UART2 的波特率，保留已有数据位、校验位、停止位和 RX buffer 配置；如果 UART2 尚未配置，则使用 `8N1` 和默认 RX buffer 创建配置。
+
 #### 6.3 示例
 
-以下示例按“先设置，再查询确认”的顺序组织。由于程序每次运行只允许一个主动作，设置和查询需要分两次执行；如果需要确认设备运行态是否生效，设置后先使用 `-H` 重启设备，重启完成后再查询。
+以下示例按“先设置，再查询确认”的顺序组织。由于程序每次运行只允许一个主动作，设置和查询需要分两次执行；如果需要确认设备运行态是否生效，设置后先使用 `-H` 重启设备，重启完成后再查询。远程操作时在命令中增加 `--remote`，非默认对端使用 `--remote-slot <slot>`。
+
+远程查询对端全部 MiniDB 信息：
+
+```sh
+./l4_minidb_config --remote -A
+```
+
+远程写入对端 MiniDB role：
+
+```sh
+./l4_minidb_config --remote -R ap
+```
+
+远程写入对端 slot MAC：
+
+```sh
+./l4_minidb_config --remote -S 1,11:22:33:44
+```
+
+远程重置对端 MiniDB：
+
+```sh
+./l4_minidb_config --remote -D
+```
+
+远程重启对端设备：
+
+```sh
+./l4_minidb_config --remote -H
+```
+
+远程操作指定 remote slot，并在写入成功后重启对端：
+
+```sh
+./l4_minidb_config --remote --remote-slot 1 -B auto -H
+```
 
 ##### 6.3.1 设置 role 为 AP 后查询
 
@@ -1671,7 +1745,106 @@ band=auto(0x07)
 reboot requested
 ```
 
+##### 6.3.15 设置 UART2 波特率后查询
+
+将 MiniDB 中 UART2 波特率设置为 `115200`：
+
+```sh
+./l4_minidb_config -U 115200
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_SET_UART]
+id=2
+uart2_baudrate=115200
+set minidb UART2 baudrate ok
+```
+
+查询确认 MiniDB 中保存的 UART2 波特率：
+
+```sh
+./l4_minidb_config -u
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_UART]
+id=2
+uart2_baudrate=115200
+```
+
+### 7、UART 配置示例
+
+`l4_uart_config` 用于演示通过 `PRJ_CMD_SET_UART` 和 `PRJ_CMD_GET_UART` 设置、查询设备 UART 配置。该示例使用 SDK 统一例程参数风格，`-a/-p/-i` 用于连接 daemon 和选择设备，UART id 由 `--get-uart` 或 `--set-uart` 指定。
+
+#### 7.1 程序参数说明
+
+公共参数：
+
+| 参数 | 长参数 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `-h` | `--help` | 打印帮助 | 无 |
+| `-a <addr>` | `--addr <addr>` | daemon 地址 | `127.0.0.1` |
+| `-p <port>` | `--port <port>` | daemon 端口 | `BB_PORT_DEFAULT` |
+| `-i <index>` | `--index <index>` | 设备序号 | `0` |
+
+查询参数：
+
+| 参数 | 长参数 | 说明 |
+| --- | --- | --- |
+| `-g <id>` | `--get-uart <id>` | 查询指定 UART 的 running 配置 |
+
+设置参数：
+
+| 参数 | 长参数 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `-U <id>` | `--set-uart <id>` | 设置指定 UART | 无 |
+| `-b <rate>` | `--baudrate <rate>` | UART 波特率 | `115200` |
+| `-d <5-8>` | `--data-bit <5-8>` | UART 数据位 | `8` |
+| `-P <parity>` | `--parity <parity>` | UART 校验位，支持 `none/even/odd/0/1/2` | `none` |
+| `-T <1-3>` | `--stop-bit <1-3>` | UART 停止位协议值，`1:1bit / 2:1.5bits / 3:2bits` | `1` |
+| `-r <n>` | `--rx-buf-size <n>` | UART RX buffer 大小，`0` 表示设备默认值 | `0` |
+| `-A` | `--apply` | 设置后请求立即应用到运行态 | 不执行 |
+
+其它参数：
+
+| 参数 | 长参数 | 说明 |
+| --- | --- | --- |
+| `-s <slot>` | `--slot <slot>` | 通过 remote ioctl slot 执行命令 |
+
+每次运行只允许一个主动作：`--get-uart` 或 `--set-uart` 二选一。设置动作不会自动查询，设置后如需确认，请再次执行 `--get-uart`。
+
+#### 7.2 示例
+
+只查询 UART 1：
+
+```sh
+./l4_uart_config -g 1
+```
+
+设置 UART 1 为 `115200 8N1`，写入 MiniDB：
+
+```sh
+./l4_uart_config -U 1 -b 115200 -d 8 -P none -T 1 -r 0
+```
+
+设置 UART 1 为 `9600 8N1`，并请求立即应用到运行态：
+
+```sh
+./l4_uart_config -U 1 -b 9600 -d 8 -P none -T 1 -A
+```
+
+通过 remote ioctl slot 0 查询 UART 1：
+
+```sh
+./l4_uart_config -s 0 -g 1
+```
+
 ## 四、常见问题
+
 
 ### 1、程序提示没有设备
 
@@ -1712,7 +1885,9 @@ reboot requested
 本文档只说明常用工具和示例的使用方式。完整 API 命令字、输入输出结构体和字段说明请参考：
 
 ```text
-L4_Linux_SDK/docs/api.md
+L4_Linux_SDK/com/bb_api.h
+L4_Linux_SDK/com/prj_rpc.h
+L4_Linux_SDK/app/ar8030/ar_net_api.h
 ```
 
 ### 6、常见问题速查

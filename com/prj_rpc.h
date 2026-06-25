@@ -22,6 +22,8 @@ typedef enum {
     PRJ_CMD_SET_REPEATER_MODE,
     PRJ_CMD_SET_XDS_INTF_EN,
     PRJ_CMD_SET_FREQ_LIST,
+    PRJ_CMD_SET_CHAN_PWR_PLUS,
+    PRJ_CMD_SET_UART,
     PRJ_CMD_GET_BAND = 128,
     PRJ_CMD_GET_ROLE,
     PRJ_CMD_GET_AP_MAC,
@@ -34,6 +36,8 @@ typedef enum {
     PRJ_CMD_GET_XDS_INTF_EN,
     PRJ_CMD_GET_PRJ_FEATURE,
     PRJ_CMD_GET_FREQ_LIST,
+    PRJ_CMD_GET_CHAN_PWR_PLUS,
+    PRJ_CMD_GET_UART,
     PRJ_CMD_EVENT_DEMO = 200,
     PRJ_CMD_EVENT_PAIR,
     PRJ_CMD_EVENT_PAIR_STOP,
@@ -76,6 +80,22 @@ typedef struct {
     uint8_t repeater_mode;  // 1:relay mode ; else: not relay mode
 } prj_cmd_set_repeater_mode_t;
 typedef prj_cmd_set_repeater_mode_t prj_cmd_get_repeater_mode_t;
+
+typedef struct {
+    uint8_t     id;             // id of the UART.
+    uint8_t     apply;          // Whether apply to running sys.
+    uint32_t    baudrate;       // baudrate of uart(9600, 115200, etc...).
+    uint8_t     dbit;           // databit of uart(5, 6, 7, 8, etc..).
+    uint8_t     parity;         // parity of uart(0:none, 1:even, 2:odd).
+    uint8_t     stop_bit;       // stop bit of uart(1:1bit, 2:1.5bits, 3:2bits).
+    uint32_t    rx_buff_size;   // buffer size of the uart rx, set 0 for default.
+} __attribute__((__packed__)) prj_cmd_set_uart_t;
+
+typedef struct {
+    uint8_t  id;
+    uint8_t running;
+} prj_cmd_get_uart_in_t;
+typedef prj_cmd_set_uart_t prj_cmd_get_uart_out_t;
 
 #define prj_cmd_get_ap_mac_t prj_cmd_set_ap_mac_t
 #define prj_cmd_get_mac_t prj_cmd_set_mac_t
@@ -181,6 +201,12 @@ typedef struct {
     uint32_t freq[BB_CONFIG_MAX_CHAN_NUM];                      /**<@note freq列表*/
 } prj_cmd_set_freq_list_t;
 typedef prj_cmd_set_freq_list_t prj_cmd_get_freq_list_t;
+
+typedef struct {
+    uint8_t pwr_plus_num;                                       /**<@note 列表中pwr plus数量*/
+    int8_t pwr_plus[BB_CONFIG_MAX_CHAN_NUM];                    /**<@note chan pwr plus列表*/
+} prj_cmd_set_chan_pwr_plus_t;
+typedef prj_cmd_set_chan_pwr_plus_t prj_cmd_get_chan_pwr_plus_t;
 
 void prj_rpc_init(void);
 

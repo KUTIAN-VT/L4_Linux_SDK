@@ -79,6 +79,7 @@ install/arm64/
 | 示例程序 | `l4_link_config` | 链路频段、信道、频宽、MCS 配置 |
 | 示例程序 | `l4_config_file` | 配置文件导入、导出和恢复 |
 | 示例程序 | `l4_minidb_config` | MiniDB 持久化配置读写 |
+| 示例程序 | `l4_uart_config` | UART 配置读写 |
 
 `examples/00_common` 是示例公共库，封装连接 daemon、枚举设备和打开设备的公共流程，不是可单独运行的示例程序。
 
@@ -114,14 +115,7 @@ cd L4_Linux_SDK
 ./script/cmk-arm.sh
 ```
 
-脚本会配置 `build/arm64`，当前默认构建：
-
-```text
-ar8030_client
-l4_daemon
-l4_ota_upgrade
-l4_minidb_config
-```
+脚本会配置 `build/arm64`，并构建安装当前 SDK 的核心库、daemon、应用工具和示例程序，确保后续 `cmake --install` 能生成完整 `install/arm64/` 目录。
 
 安装输出位于：
 
@@ -180,10 +174,11 @@ cd <deploy-dir>/bin
 sudo ./l4_daemon
 ```
 
-当前 ARM64 脚本默认会构建 `l4_minidb_config`，可根据实际设备状态运行：
+ARM64 脚本会构建并安装示例程序，可根据实际设备状态运行：
 
 ```bash
 ./l4_minidb_config -A
+./l4_uart_config -g 1
 ```
 
 如果需要在 ARM64 上运行更多示例，可在 `script/cmk-arm.sh` 中增加对应 CMake target 后重新编译。
@@ -245,6 +240,7 @@ cmake --build L4_Linux_SDK/build/x86_64 --target \
   l4_link_config \
   l4_config_file \
   l4_minidb_config \
+  l4_uart_config \
   l4_daemon \
   -j
 
@@ -268,6 +264,7 @@ cmake --build L4_Linux_SDK/build/arm64 --target \
   ar8030_client \
   l4_ota_upgrade \
   l4_minidb_config \
+  l4_uart_config \
   l4_daemon \
   -j
 
@@ -278,7 +275,7 @@ cmake --install L4_Linux_SDK/build/arm64
 
 - 第一次使用 SDK：阅读 [L4 Linux SDK 开发手册](docs/L4%20Linux%20SDK%20开发手册.md) 的”SDK 编译使用”和”最快验证”章节。
 - 开发自己的应用：先看 `examples/01_basic_info` 和 `examples/00_common`，理解连接 daemon、枚举设备、打开设备和调用 `bb_ioctl()` 的最小流程。
-- 查 API 结构体和命令字：查看 `com/bb_api.h`，并结合 `examples/` 中对应示例理解调用方式。
+- 查 API 结构体和命令字：查看 `com/bb_api.h`、`com/prj_rpc.h` 和 `app/ar8030/ar_net_api.h`，并结合 `examples/` 中对应示例理解调用方式。
 - 使用应用工具：阅读开发手册中的“应用工具”章节。
 - 调试链路和配置：阅读 `examples/03_link_monitor`、`examples/04_link_config`、`examples/05_config_file`、`examples/06_minidb_config` 下的 README。
 
@@ -289,3 +286,5 @@ cmake --install L4_Linux_SDK/build/arm64
 - SDIO 后端默认关闭。
 - `build/`、`install/`、临时文件和历史构建产物不属于源码维护范围。
 - 当前 SDK 面向 Linux，CMake 会拒绝 Windows 和 Android 构建。
+- 当前 SDK 不包含原厂 `driver/linux/` 内核模块源码；如需交付 `artosyn_drv.ko`，应作为独立驱动迁移和内核版本适配任务处理。
+- `bb_net_dev_create()`、`bb_net_dev_destroy()`、`bb_net_dev_buf_resize()` 使用 `bb_dev_handle_t *` 参数，SDK 内部负责打开和关闭 netdev 设备。

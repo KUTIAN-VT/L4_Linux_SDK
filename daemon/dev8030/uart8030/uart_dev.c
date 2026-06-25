@@ -880,6 +880,7 @@ int reg_uartrpc_platform(rpc_info* prpc, char* devs, uart_par* par)
     com_log(COM_UART_COM, "reg uart 8030 platform");
 
     uartrpc_ctrl* ctrl = malloc(sizeof(uartrpc_ctrl));
+    memset(ctrl, 0, sizeof(uartrpc_ctrl));
 
     ctrl->opts          = get_back_end();
     ctrl->basedev.pact  = &uart8030_dev_info;

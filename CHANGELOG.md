@@ -2,6 +2,15 @@
 
 本文件记录 L4 Linux SDK 的版本变更，内容根据 Git tag 和对应提交历史整理。
 
+## [Unreleased]
+
+### Changed
+
+- 同步新原厂 SDK 的 `bb_api.h`、`bb_config.h`、`ioctl_tab.c` 和 `prj_rpc.h`，新增恢复模式、纯净模式消息检查、连接 slot、扩展功率、RF 校准、UART 配置和频点功率偏移等命令定义。
+- 同步 `bb_net_dev_*` API，netdev 创建、销毁和缓冲区调整接口改为接收 `bb_dev_handle_t *`。
+- 同步 Linux socket 连接超时处理和 USB/UART 后端控制结构初始化修复。
+- 修复 `ar_net_api.h` 安装路径，并调整 ARM64 脚本目标列表，保证全量安装阶段可找到所有 install 目标。
+
 ## [v0.2.0] - 2026-06-09
 
 Git tag: `v0.2.0`

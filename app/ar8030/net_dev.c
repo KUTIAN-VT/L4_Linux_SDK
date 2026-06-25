@@ -31,11 +31,15 @@ AR8030_API int bb_net_dev_open(bb_dev_handle_t* dev)
     int ret = 0;
     char fd_name[256] = {0};
 
+    if (!dev) {
+        return -1;
+    }
+
     sprintf(fd_name, "/dev/ar_net%d", dev->sel_id);
     fd = open(fd_name, O_RDWR);
     if (fd == -1){
         printf("Open device(%s) failed! %s\n", fd_name, strerror(errno));
-        return -1;
+        return -2;
     }
 
     return fd;
@@ -53,10 +57,16 @@ AR8030_API int bb_net_dev_close(int net_dev_fd)
     return 0;
 }
 
-AR8030_API int bb_net_dev_create(int net_dev_fd, ar_netif_t *ar_netif)
+AR8030_API int bb_net_dev_create(bb_dev_handle_t* dev, ar_netif_t *ar_netif)
 {
     int ret = 0;
+    int net_dev_fd = 0;
     ar_netif->op_type = AR_NET_OP_CREATE;
+
+    net_dev_fd = bb_net_dev_open(dev);
+    if (net_dev_fd < 0) {
+        return -1;
+    }
 
     ret = cmd_port_handle(net_dev_fd, ar_netif);
     if (!ret) {
@@ -66,13 +76,21 @@ AR8030_API int bb_net_dev_create(int net_dev_fd, ar_netif_t *ar_netif)
         printf("Create net dev failed! ret %d\n", ret);
     }
 
+    bb_net_dev_close(net_dev_fd);
+
     return ret;
 }
 
-AR8030_API int bb_net_dev_destroy(int net_dev_fd, unsigned char slot, unsigned short socket_port)
+AR8030_API int bb_net_dev_destroy(bb_dev_handle_t* dev, unsigned char slot, unsigned short socket_port)
 {
     int ret = 0;
+    int net_dev_fd = 0;
     ar_netif_t ar_netif = {0};
+
+    net_dev_fd = bb_net_dev_open(dev);
+    if (net_dev_fd < 0) {
+        return -1;
+    }
 
     ar_netif.slot = slot;
     ar_netif.socket_port = socket_port;
@@ -86,13 +104,21 @@ AR8030_API int bb_net_dev_destroy(int net_dev_fd, unsigned char slot, unsigned s
         printf("Destroy net dev failed! ret %d\n", ret);
     }
 
+    bb_net_dev_close(net_dev_fd);
+
     return ret;
 }
 
-AR8030_API int bb_net_dev_buf_resize(int net_dev_fd, ar_netif_t *ar_netif)
+AR8030_API int bb_net_dev_buf_resize(bb_dev_handle_t* dev, ar_netif_t *ar_netif)
 {
     int ret = 0;
+    int net_dev_fd = 0;
     ar_netif->op_type = AR_NET_OP_BUF_RESIZE;
+
+    net_dev_fd = bb_net_dev_open(dev);
+    if (net_dev_fd < 0) {
+        return -1;
+    }
 
     ret = cmd_port_handle(net_dev_fd, ar_netif);
     if (!ret) {
@@ -101,6 +127,8 @@ AR8030_API int bb_net_dev_buf_resize(int net_dev_fd, ar_netif_t *ar_netif)
     else {
         printf("Resize net dev failed! ret %d\n", ret);
     }
+
+    bb_net_dev_close(net_dev_fd);
 
     return ret;
 }

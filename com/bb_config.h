@@ -226,7 +226,7 @@ extern "C" {
 #define BB_CONFIG_BR_FREQ_OFFSET            0           /**<@note BR与信道的频偏值 单位：KHz*/
 #define BB_CONFIG_LINK_UNLOCK_TIMEOUT       1000        /**<@note Link通道超时门限 单位：毫秒*/
 #define BB_CONFIG_SLOT_UNLOCK_TIMEOUT       1000        /**<@note FCH超时门限 单位：毫秒*/
-#define BB_CONFIG_IDLE_SLOT_THRED           10          /**<@note SLOT空闲门限，用于动态slot模式，单位：秒*/
+#define BB_CONFIG_IDLE_SLOT_THRED           1          /**<@note SLOT空闲门限，用于动态slot模式，单位：秒*/
 #define BB_CONFIG_EOP_SAMPLE_NUM            8           /**<@note EOP处理最近样本大小*/
 #define BB_CONFIG_ENABLE_BR_MCS             1           /**<@note 使能BR的MCS控制，仅对1V1模式有效*/
 #define BB_CONFIG_ENABLE_BLOCK_SWITCH       1           /**<@note 使用阻塞式模式切换机制（实验室阶段）*/
@@ -248,6 +248,7 @@ extern "C" {
 #define BB_CONFIG_ENABLE_DFS                0           /**<@note 使能DFS开关*/
 #define BB_CONFIG_DFS_FREQ_OFFSET           500         /**<@note dfs检测的频偏值 单位：KHz*/
 #define BB_CONFIG_TLV_PACKET_LOST_DEBUG     0           /**<@note 基带丢包检测开关*/
+#define BB_CONFIG_ENABLE_THROUGHPUT_FUNC    1           /**<@note 使能获取吞吐率功能*/
 #define BB_CONFIG_PWR_AUTO2                 1           /**<@note 功率自适应2.0版本，参考了packet err*/
 #define BB_CONFIG_SOCKET_RX_BUF_SHARE       0           /**<@note 使用mblk提供socket rx buffer*/
 #define BB_CONFIG_ENABLE_TR_SWITCH_HOOK     1           /**<@note 使能TR SWITCH钩子*/

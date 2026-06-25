@@ -21,6 +21,8 @@ static void usage(const char *prog)
     printf("  -g <file>       dump config file with BB_GET_CFG\n");
     printf("  -s <file>       write config file with BB_SET_CFG\n");
     printf("  -r              reset config file with BB_RESET_CFG\n");
+    printf("  -R              operate peer device by remote ioctl, default remote slot: 0\n");
+    printf("  -S <slot>       remote slot id for -R, default: 0\n");
     printf("  -m <mode>       BB_GET_CFG mode: auto/memory/flash or 0/1/2, default: auto\n");
 }
 
@@ -104,6 +106,63 @@ static uint16_t crc16_ccitt_update(uint16_t crc, const uint8_t *data, size_t len
     return crc;
 }
 
+static int config_file_ioctl(bb_dev_handle_t *handle,
+                             uint32_t request,
+                             const void *input,
+                             uint16_t input_len,
+                             void *output,
+                             uint16_t output_len,
+                             int remote_slot)
+{
+    bb_remote_ioctl_in_t remote_in;
+    bb_remote_ioctl_out_t remote_out;
+    int ret;
+
+    if (remote_slot < 0) {
+        return bb_ioctl(handle, request, input, output);
+    }
+
+    if ((input_len && !input) || input_len > sizeof(remote_in.data) ||
+        output_len > sizeof(remote_out.data)) {
+        printf("remote ioctl buffer invalid, request=0x%x in_len=%u out_len=%u\n",
+               request,
+               input_len,
+               output_len);
+        return -1;
+    }
+
+    memset(&remote_in, 0, sizeof(remote_in));
+    memset(&remote_out, 0, sizeof(remote_out));
+
+    if (input_len) {
+        memcpy(remote_in.data, input, input_len);
+    }
+
+    remote_in.len = input_len;
+    remote_in.slot = (uint8_t)remote_slot;
+    remote_in.msg_id = request;
+
+    ret = bb_ioctl(handle, BB_REMOTE_IOCTL_REQ, &remote_in, &remote_out);
+    if (ret) {
+        return ret;
+    }
+
+    if (output && output_len) {
+        memcpy(output, remote_out.data, output_len);
+    }
+
+    return 0;
+}
+
+static void print_config_title(const char *title, int remote_slot)
+{
+    if (remote_slot >= 0) {
+        printf("\n[%s remote slot=%d]\n", title, remote_slot);
+    } else {
+        printf("\n[%s]\n", title);
+    }
+}
+
 static int read_file(const char *path, uint8_t **data, size_t *length)
 {
     FILE *fp;
@@ -166,7 +225,7 @@ static int read_file(const char *path, uint8_t **data, size_t *length)
     return 0;
 }
 
-static int dump_config_file(bb_dev_handle_t *handle, const char *path, int mode)
+static int dump_config_file(bb_dev_handle_t *handle, const char *path, int mode, int remote_slot)
 {
     FILE *fp;
     uint16_t seq = 0;
@@ -183,7 +242,7 @@ static int dump_config_file(bb_dev_handle_t *handle, const char *path, int mode)
         return -1;
     }
 
-    printf("\n[BB_GET_CFG]\n");
+    print_config_title("BB_GET_CFG", remote_slot);
     printf("mode=%s(%d) output=%s\n", cfg_mode_name(mode), mode, path);
 
     while (1) {
@@ -198,7 +257,13 @@ static int dump_config_file(bb_dev_handle_t *handle, const char *path, int mode)
         input.offset = offset;
         input.length = (uint16_t)sizeof(output.data);
 
-        ret = bb_ioctl(handle, BB_GET_CFG, &input, &output);
+        ret = config_file_ioctl(handle,
+                                BB_GET_CFG,
+                                &input,
+                                (uint16_t)sizeof(input),
+                                &output,
+                                (uint16_t)sizeof(output),
+                                remote_slot);
         if (ret) {
             printf("BB_GET_CFG failed, ret=%d seq=%u offset=%u\n", ret, seq, offset);
             break;
@@ -299,7 +364,7 @@ static int dump_config_file(bb_dev_handle_t *handle, const char *path, int mode)
     return ret;
 }
 
-static int set_config_file(bb_dev_handle_t *handle, const char *path)
+static int set_config_file(bb_dev_handle_t *handle, const char *path, int remote_slot)
 {
     uint8_t *data = NULL;
     size_t length = 0;
@@ -315,7 +380,7 @@ static int set_config_file(bb_dev_handle_t *handle, const char *path)
 
     crc = crc16_ccitt_update(0, data, length);
 
-    printf("\n[BB_SET_CFG]\n");
+    print_config_title("BB_SET_CFG", remote_slot);
     printf("input=%s total_length=%zu total_crc16=0x%04x\n", path, length, crc);
 
     while (offset < length) {
@@ -334,7 +399,13 @@ static int set_config_file(bb_dev_handle_t *handle, const char *path)
         input.length = (uint16_t)chunk;
         memcpy(input.data, data + offset, chunk);
 
-        ret = bb_ioctl(handle, BB_SET_CFG, &input, NULL);
+        ret = config_file_ioctl(handle,
+                                BB_SET_CFG,
+                                &input,
+                                (uint16_t)sizeof(input),
+                                NULL,
+                                0,
+                                remote_slot);
         if (ret) {
             printf("BB_SET_CFG failed, ret=%d seq=%u offset=%u length=%u\n",
                    ret,
@@ -355,12 +426,12 @@ static int set_config_file(bb_dev_handle_t *handle, const char *path)
     return 0;
 }
 
-static int reset_config_file(bb_dev_handle_t *handle)
+static int reset_config_file(bb_dev_handle_t *handle, int remote_slot)
 {
     int ret;
 
-    printf("\n[BB_RESET_CFG]\n");
-    ret = bb_ioctl(handle, BB_RESET_CFG, NULL, NULL);
+    print_config_title("BB_RESET_CFG", remote_slot);
+    ret = config_file_ioctl(handle, BB_RESET_CFG, NULL, 0, NULL, 0, remote_slot);
     if (ret) {
         printf("BB_RESET_CFG failed, ret=%d\n", ret);
         return ret;
@@ -379,12 +450,15 @@ int main(int argc, char **argv)
     int dev_index = 0;
     int cfg_mode = 0;
     int do_reset = 0;
+    int remote = 0;
+    int remote_slot = 0;
+    int remote_slot_set = 0;
     int action_count = 0;
     int opt;
     int ret;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:g:s:rm:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:g:s:rRS:m:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -414,6 +488,15 @@ int main(int argc, char **argv)
             do_reset = 1;
             ++action_count;
             break;
+        case 'R':
+            remote = 1;
+            break;
+        case 'S':
+            if (parse_int_range(optarg, 0, 255, "remote slot", &remote_slot)) {
+                return -1;
+            }
+            remote_slot_set = 1;
+            break;
         case 'm':
             if (parse_cfg_mode(optarg, &cfg_mode)) {
                 return -1;
@@ -431,6 +514,12 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    if (remote_slot_set && !remote) {
+        printf("-S is only valid with -R\n");
+        usage(argv[0]);
+        return -1;
+    }
+
     if (cfg_mode != 0 && !get_path) {
         printf("-m is only valid with -g\n");
         usage(argv[0]);
@@ -443,11 +532,11 @@ int main(int argc, char **argv)
     }
 
     if (get_path) {
-        ret = dump_config_file(ctx.handle, get_path, cfg_mode);
+        ret = dump_config_file(ctx.handle, get_path, cfg_mode, remote ? remote_slot : -1);
     } else if (set_path) {
-        ret = set_config_file(ctx.handle, set_path);
+        ret = set_config_file(ctx.handle, set_path, remote ? remote_slot : -1);
     } else if (do_reset) {
-        ret = reset_config_file(ctx.handle);
+        ret = reset_config_file(ctx.handle, remote ? remote_slot : -1);
     }
 
     bb_demo_close(&ctx);
