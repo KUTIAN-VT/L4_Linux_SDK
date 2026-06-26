@@ -1,9 +1,7 @@
 # L4 Linux SDK 开发手册
 
-> 文档版本：v0.3.0  
-> 最后更新：2026-06-22
 
-本文档面向 Linux SDK 使用者，说明快速接入、常用工具和 API 示例的使用方法。
+本文档面向 Linux SDK 使用者，说明快速接入、常用工具和 API 示例的使用方法。`README.md` 只保留项目入口、最小编译和最小验证；本文档作为完整开发、部署和排错说明。
 
 ## 一、SDK 编译使用
 
@@ -137,6 +135,8 @@ L4_Linux_SDK/install/arm64/
 
 常用可执行程序位于 `install/arm64/bin/` 目录，动态库位于 `install/arm64/lib/` 目录。
 
+两个编译脚本默认构建并安装 `ar8030_client`、`l4_daemon`、`l4_tuntap`、`l4_ota_upgrade` 和 `examples/` 下全部业务示例。需要只构建部分 target 或调整 CMake 选项时，请参考“高级构建”章节。
+
 ### x86_64 最快验证
 
 适用于 Ubuntu PC 或 Ubuntu 虚拟机。目标是先在本机完成最小链路验证。
@@ -234,7 +234,7 @@ bb_host_connect("127.0.0.1", BB_PORT_DEFAULT)
   -> bb_host_disconnect(...)
 ```
 
-建议先参考 `examples/01_basic_info` 的基础信息查询流程，再根据需求阅读 `examples/02_pair_manager` 到 `examples/05_config_file`。
+建议先参考 `examples/01_basic_info` 的基础信息查询流程，再根据需求阅读 `examples/02_pair_manager` 到 `examples/07_uart_config`。
 
 ### 通用参数说明
 
@@ -429,7 +429,7 @@ rtt min/avg/max/mdev = 27.678/30.619/34.187/2.471 ms
 
 ## 三、API 示例
 
-SDK 在 `examples/` 下提供 6 个常用 API 示例。它们都复用 `examples/00_common` 中的公共连接流程：
+SDK 在 `examples/` 下提供 7 个业务 API 示例，另有 `examples/00_common` 公共连接库。业务示例都复用 `examples/00_common` 中的公共连接流程：
 
 ```text
 bb_host_connect()
@@ -1843,8 +1843,85 @@ uart2_baudrate=115200
 ./l4_uart_config -s 0 -g 1
 ```
 
-## 四、常见问题
+## 四、高级构建
 
+通常优先使用 `script/` 下的脚本。只有需要手动控制 CMake 参数、只构建部分 target、或排查交叉编译配置时，才建议直接执行 CMake 命令。
+
+### 1、常用 CMake 选项
+
+| 选项 | 默认值 | 说明 |
+|-|-|-|
+| `CMAKE_INSTALL_PREFIX` | 脚本按架构设置 | 安装输出目录。 |
+| `CMAKE_BUILD_TYPE` | `RelWithDebInfo` | 构建类型。 |
+| `CMAKE_TOOLCHAIN_FILE` | arm64 构建使用 `compiler.arm.cmake` | 交叉编译工具链文件。 |
+| `APP_STATIC_LIB` | `OFF` | `OFF` 时生成 `libar8030_client.so`。 |
+| `USING_8030USB` | `ON` | 启用 USB 后端。 |
+| `USING_8030UART` | `ON` | 启用 UART 后端。 |
+| `USING_8030SDIO` | `OFF` | SDIO 后端当前默认关闭。 |
+| `USING_XDS_HDR` | `ON` | 启用 XDS 包头处理。 |
+
+CMake target 名为 `ar8030_client`，默认动态库产物为 `libar8030_client.so`。
+
+### 2、x86_64 手动构建
+
+```sh
+cmake -S L4_Linux_SDK -B L4_Linux_SDK/build/x86_64 \
+  -DCMAKE_INSTALL_PREFIX=L4_Linux_SDK/install/x86_64 \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DAPP_STATIC_LIB=OFF \
+  -DUSING_8030USB=ON \
+  -DUSING_8030UART=ON \
+  -DUSING_8030SDIO=OFF \
+  -DUSING_XDS_HDR=ON
+
+cmake --build L4_Linux_SDK/build/x86_64 --target \
+  ar8030_client \
+  l4_tuntap \
+  l4_ota_upgrade \
+  l4_basic_info \
+  l4_pair_manager \
+  l4_link_monitor \
+  l4_link_config \
+  l4_config_file \
+  l4_minidb_config \
+  l4_uart_config \
+  l4_daemon \
+  -j
+
+cmake --install L4_Linux_SDK/build/x86_64
+```
+
+### 3、arm64 手动构建
+
+```sh
+cmake -S L4_Linux_SDK -B L4_Linux_SDK/build/arm64 \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX=L4_Linux_SDK/install/arm64 \
+  -DCMAKE_TOOLCHAIN_FILE=L4_Linux_SDK/compiler.arm.cmake \
+  -DAPP_STATIC_LIB=OFF \
+  -DUSING_8030USB=ON \
+  -DUSING_8030UART=ON \
+  -DUSING_8030SDIO=OFF \
+  -DUSING_XDS_HDR=ON
+
+cmake --build L4_Linux_SDK/build/arm64 --target \
+  ar8030_client \
+  l4_tuntap \
+  l4_ota_upgrade \
+  l4_basic_info \
+  l4_pair_manager \
+  l4_link_monitor \
+  l4_link_config \
+  l4_config_file \
+  l4_minidb_config \
+  l4_uart_config \
+  l4_daemon \
+  -j
+
+cmake --install L4_Linux_SDK/build/arm64
+```
+
+## 五、常见问题
 
 ### 1、程序提示没有设备
 
