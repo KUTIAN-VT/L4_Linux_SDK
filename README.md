@@ -214,12 +214,3 @@ cd L4_Linux_SDK
 - 使用应用工具：阅读开发手册中的“应用工具”章节。
 - 手动 CMake 构建和排错：阅读开发手册中的“高级构建”和“常见问题”章节。
 
-## 注意事项
-
-- USB 后端默认开启，依赖 `third_package/libusb/libusb-cmake.tar`。
-- UART 后端默认开启。
-- SDIO 后端默认关闭。
-- `build/`、`install/`、临时文件和历史构建产物不属于源码维护范围。
-- 当前 SDK 面向 Linux，CMake 会拒绝 Windows 和 Android 构建。
-- 当前 SDK 不包含原厂 `driver/linux/` 内核模块源码；如需交付 `artosyn_drv.ko`，应作为独立驱动迁移和内核版本适配任务处理。
-- `bb_net_dev_create()`、`bb_net_dev_destroy()`、`bb_net_dev_buf_resize()` 使用 `bb_dev_handle_t *` 参数，SDK 内部负责打开和关闭 netdev 设备。
