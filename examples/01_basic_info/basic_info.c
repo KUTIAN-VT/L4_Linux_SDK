@@ -190,11 +190,42 @@ static void usage(const char *prog)
     printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
+    printf("  -l              list devices and exit\n");
     printf("  -s <slot>       remote slot id for -R, default: 0; DEV uses slot 0 as AP\n");
     printf("  -S              query BB_GET_STATUS\n");
     printf("  -V              query BB_GET_SYS_INFO\n");
     printf("  -R              query peer device by remote ioctl through -s <slot>\n");
     printf("  -A              query all basic information, default action\n");
+}
+
+static int list_devices(const char *addr, int port)
+{
+    bb_demo_context_t ctx;
+    int ret;
+
+    bb_demo_context_init(&ctx);
+
+    printf("connect host %s:%d\n", addr, port);
+    ret = bb_host_connect(&ctx.host, addr, port);
+    if (ret) {
+        printf("bb_host_connect failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    ctx.dev_count = bb_dev_getlist(ctx.host, &ctx.devs);
+    if (ctx.dev_count <= 0) {
+        printf("bb_dev_getlist found no device, ret=%d\n", ctx.dev_count);
+        bb_demo_close(&ctx);
+        return -1;
+    }
+
+    printf("device count: %d\n", ctx.dev_count);
+    for (int i = 0; i < ctx.dev_count; ++i) {
+        bb_demo_print_device_info(ctx.devs[i], i);
+    }
+
+    bb_demo_close(&ctx);
+    return 0;
 }
 
 static int basic_info_ioctl(bb_dev_handle_t *handle,
@@ -354,11 +385,12 @@ int main(int argc, char **argv)
     int do_status = 0;
     int do_sys_info = 0;
     int remote = 0;
+    int list_only = 0;
     int opt;
     int ret;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:SVRA")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:ls:SVRA")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -371,6 +403,9 @@ int main(int argc, char **argv)
             break;
         case 'i':
             dev_index = (int)strtol(optarg, NULL, 10);
+            break;
+        case 'l':
+            list_only = 1;
             break;
         case 's':
             slot = (int)strtol(optarg, NULL, 10);
@@ -392,6 +427,11 @@ int main(int argc, char **argv)
             usage(argv[0]);
             return -1;
         }
+    }
+
+    if (list_only) {
+        ret = list_devices(addr, port);
+        return ret ? -1 : 0;
     }
 
     if (!do_status && !do_sys_info) {

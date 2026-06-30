@@ -267,6 +267,12 @@ bb_host_connect("127.0.0.1", BB_PORT_DEFAULT)
 ./l4_basic_info -i 1
 ```
 
+如果不确定要选择哪个 index，可先用 `l4_basic_info` 列出 daemon 当前设备：
+
+```sh
+./l4_basic_info -l
+```
+
 这些通用参数可与各程序自身业务参数组合使用，例如：
 
 ```sh
@@ -459,6 +465,7 @@ bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 | `-S` | 查询 `BB_GET_STATUS`，打印设备状态和链路状态 | 无    |
 | `-V` | 查询 `BB_GET_SYS_INFO`，打印系统和版本信息 | 无    |
 | `-A` | 查询全部基础信息                       | 默认动作 |
+| `-l` | 查看 daemon 当前设备列表，不打开设备          | 无    |
 
 
 如果不指定 `-S`、`-V` 或 `-A`，程序默认执行全量查询。
@@ -466,18 +473,27 @@ bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 #### 1.2 标准使用方法
 
 1. 启动 `l4_daemon`。
-2. 执行 `l4_basic_info` 查询基础状态。
-3. 根据输出确认设备角色、工作模式、版本和链路状态。
+2. 如有多个设备，可先执行 `l4_basic_info -l` 查看设备列表，再用 `-i <index>` 选择目标设备。
+3. 执行 `l4_basic_info` 查询基础状态。
+4. 根据输出确认设备角色、工作模式、版本和链路状态。
 
 #### 1.3 示例
 
-##### 1.3.1 查询全部基础信息：
+##### 1.3.1 查看当前设备列表：
+
+```sh
+./l4_basic_info -l
+```
+
+`-l` 只连接 daemon 并打印 `device[index]` 和 MAC，不会打开设备，也不会执行 `BB_GET_SYS_INFO` 或 `BB_GET_STATUS`。
+
+##### 1.3.2 查询全部基础信息：
 
 ```sh
 ./l4_basic_info
 ```
 
-##### 1.3.2 只查询系统版本：
+##### 1.3.3 只查询系统版本：
 
 ```sh
 ./l4_basic_info -V
@@ -494,7 +510,7 @@ hardware_ver : Unknown_4.0
 firmware_ver : KT-2458-G-V1.1.8-U
 ```
 
-##### 1.3.3 只查询设备状态：
+##### 1.3.4 只查询设备状态：
 
 ```sh
 ./l4_basic_info -S
@@ -1977,4 +1993,3 @@ L4_Linux_SDK/app/ar8030/ar_net_api.h
 | 连接 daemon 失败 | `l4_daemon` 是否仍在运行，端口是否被占用，客户端是否连接默认地址 `127.0.0.1` 和默认端口。 |
 | 提示没有设备 | `lsusb` 是否能看到 L4-BOX，`l4_daemon` 是否有设备访问权限。 |
 | arm64 程序无法运行 | 是否误用了 `install/x86_64` 产物，开发板上应使用 `install/arm64` 产物。 |
-

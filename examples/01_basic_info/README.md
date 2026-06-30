@@ -38,6 +38,7 @@
 | `-a <addr>` | daemon 地址 | `127.0.0.1` |
 | `-p <port>` | daemon 端口 | `BB_PORT_DEFAULT` |
 | `-i <index>` | 选择第几个设备 | `0` |
+| `-l` | 查看当前设备列表，不打开设备 | 无 |
 | `-s <slot>` | `-R` 远程查询使用的对端 slot；DEV 侧 slot 0 表示 AP | `0` |
 | `-h` | 打印帮助信息 | 无 |
 
@@ -96,6 +97,18 @@
 
 默认情况下程序连接 `127.0.0.1:BB_PORT_DEFAULT`。如果 daemon 跑在其它机器或其它端口，可以用 `-a` 和 `-p` 指定。
 
+### 查看当前设备列表
+
+```sh
+./l4_basic_info -l
+```
+
+`-l` 只连接 daemon 并打印当前枚举到的设备列表，不会打开设备，也不会查询系统信息或状态。看到列表后，可以根据 `device[index]` 选择要打开的设备：
+
+```sh
+./l4_basic_info -i 1
+```
+
 ### 指定设备 index
 
 ```sh
@@ -129,6 +142,8 @@
     |
 关闭设备连接和 daemon 连接
 ```
+
+如果执行 `./l4_basic_info -l`，流程会在打印设备列表后结束，不会进入打开设备和 ioctl 查询步骤。
 
 ### 第一步：连接 daemon 和打开设备
 
@@ -295,6 +310,7 @@ user phy status:
 | `mode_name()` | 把模式枚举值转换成可读字符串 |
 | `link_state_name()` | 把链路状态枚举值转换成可读字符串 |
 | `print_mac()` | 按 `xx:xx:xx:xx:xx:xx` 格式打印 MAC |
+| `list_devices()` | 连接 daemon、获取设备列表并打印设备信息，不打开设备 |
 | `bb_demo_open()` | 连接 daemon、枚举设备、打开指定设备 |
 | `bb_demo_close()` | 关闭设备、释放设备列表、断开 daemon |
 
