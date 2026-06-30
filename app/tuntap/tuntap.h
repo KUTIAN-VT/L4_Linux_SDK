@@ -26,6 +26,7 @@ struct bb_tun_cfg {
     std::unique_ptr<tuntap::tap> dev;
     // common
     int debugflg = 0;
+    int force_close_on_open_fail = 0;
     int buff_max = 4096;
     uint32_t rx_buf_len = 40000;
     uint32_t tx_buf_len = 60000;

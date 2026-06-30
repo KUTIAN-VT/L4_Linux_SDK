@@ -26,6 +26,8 @@ int usage(void)
     printf("  -u, --user <user>      baseband user id, default: 0\n");
     printf("  -d, --dev <name>       TAP device name, default: tap0\n");
     printf("  -v, --debug            debug mode in ethernet transfer\n");
+    printf("  -k, --force-close-on-open-fail\n");
+    printf("                         force close BB socket and retry once if open fails\n");
     printf("  -r, --rx-buf <bytes>   rx buffer length, default: 40000\n");
     printf("  -t, --tx-buf <bytes>   tx buffer length, default: 60000\n");
 
@@ -34,13 +36,14 @@ int usage(void)
 
 static void print_tuntap_cfg(const bb_tun_cfg& cfg)
 {
-    printf("l4_tuntap args: -u %d -P %d -I %s -d %s -r %u -t %u\n",
+    printf("l4_tuntap args: -u %d -P %d -I %s -d %s -r %u -t %u -k %d\n",
            (int)cfg.slot_id,
            cfg.port_id,
            cfg.ip,
            cfg.devname,
            (unsigned int)cfg.rx_buf_len,
-           (unsigned int)cfg.tx_buf_len);
+           (unsigned int)cfg.tx_buf_len,
+           cfg.force_close_on_open_fail);
     fflush(stdout);
 }
 
@@ -407,7 +410,7 @@ static int tun_test(bb_tun_cfg& cfg)
         printf("connect failed = %d\n", ret);
         return ret;
     }
-    bb_sock_opt_t opt;
+    bb_sock_opt_t opt = {0};
 
     bb_dev_t** devs;
 
@@ -462,7 +465,33 @@ static int tun_test(bb_tun_cfg& cfg)
                                &opt);
     if (cfg.bb_fd < 0) {
         printf("create bb socket failed!\n");
-		return 0;
+        if (!cfg.force_close_on_open_fail) {
+            return 0;
+        }
+
+        bb_force_close_socket_t force_close = {0};
+        force_close.slot = (uint8_t)cfg.slot_id;
+        force_close.port = (uint8_t)cfg.port_id;
+        ret = bb_ioctl(cfg.pdev, BB_FORCE_CLS_SOCKET, &force_close, NULL);
+        printf("BB_FORCE_CLS_SOCKET slot %u port %u ret %d\n",
+               (unsigned int)force_close.slot,
+               (unsigned int)force_close.port,
+               ret);
+        if (ret) {
+            return ret;
+        }
+
+        usleep(200 * 1000);
+        cfg.bb_fd = bb_socket_open(cfg.pdev,
+                                   cfg.slot_id,
+                                   cfg.port_id,
+                                   BB_SOCK_FLAG_RX | BB_SOCK_FLAG_TX,
+                                   &opt);
+        if (cfg.bb_fd < 0) {
+            printf("retry create bb socket failed!\n");
+            return -1;
+        }
+        printf("retry create bb socket success, ar_bb_socket_fd = %d\n", cfg.bb_fd);
     } else {
         printf("lgeng - 0  ar_bb_socket_fd = %d\n", cfg.bb_fd);
     }
@@ -480,7 +509,7 @@ int main(int argc, char* argv[])
 {
     int         opt           = 0;
     int         flag_help     = 0;
-    const char* short_options = "ha:p:i:P:I:u:d:vr:t:";
+    const char* short_options = "ha:p:i:P:I:u:d:vkr:t:";
 
     bb_tun_cfg    cfg;
     struct option long_options[] = {
@@ -493,6 +522,7 @@ int main(int argc, char* argv[])
         { "user",      required_argument, NULL, 'u'},
         { "dev",   required_argument, NULL, 'd'},
         { "debug", no_argument,       NULL, 'v'},
+        { "force-close-on-open-fail", no_argument, NULL, 'k'},
         { "rx-buf",    required_argument, NULL, 'r'},
         { "tx-buf",    required_argument, NULL, 't'},
         { 0,       0,                 0,    0  },
@@ -529,6 +559,10 @@ int main(int argc, char* argv[])
             printf("Set cfg.debugflg = 1 \n");
             cfg.debugflg = 1;
             break;
+        case 'k':
+            printf("Set cfg.force_close_on_open_fail = 1 \n");
+            cfg.force_close_on_open_fail = 1;
+            break;
         case 'r':
             cfg.rx_buf_len = strtoul(optarg, NULL, 10);
             break;
@@ -562,4 +596,3 @@ int main(int argc, char* argv[])
 
     return tun_test(cfg);
 }
-

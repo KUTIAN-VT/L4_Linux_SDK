@@ -364,11 +364,14 @@ upgrade done
 | `-I, --tap-ip <ip>`    | 指定 TAP 设备 IP，必填     | 无       |
 | `-d, --dev <dev>`      | 指定 TAP 设备名          | `tap0`  |
 | `-v, --debug`          | 打开网络透传调试打印          | 关闭      |
+| `-k, --force-close-on-open-fail` | socket 打开失败时强制关闭同 slot/transport 的 socket 并重试一次 | 关闭 |
 | `-r, --rx_buf <len>`   | 指定 RX buffer 长度     | `40000` |
 | `-t, --tx_buf <len>`   | 指定 TX buffer 长度     | `60000` |
 
 
 `-I` 是网络透传工具的关键参数，用于给 TAP 虚拟网卡配置 IP。两端设备应配置在同一网段，并避免 IP 冲突。
+
+如果异常退出后再次启动提示基带 socket 创建失败，可增加 `-k`。该参数会在首次打开当前 `-u` 和 `-P` 指定的 socket 失败时调用 `BB_FORCE_CLS_SOCKET`，等待 200ms 后自动重试一次。
 
 #### 2.2 标准使用方法
 
@@ -396,7 +399,7 @@ sudo ./l4_tuntap -I 192.168.144.66 -d tap0
 `l4_tuntap` 正常启动输出示例：
 
 ```text
-l4_tuntap args: -u 0 -P 3 -I 192.168.144.55 -d tap0 -r 40000 -t 60000
+l4_tuntap args: -u 0 -P 3 -I 192.168.144.55 -d tap0 -r 40000 -t 60000 -k 0
 dev = tap0,ip = 192.168.144.55,mtu = 4000 , tun_fd = 4
 lgeng - 0  ar_bb_socket_fd = 0
 ```
