@@ -438,7 +438,7 @@ rtt min/avg/max/mdev = 27.678/30.619/34.187/2.471 ms
 
 ## 三、API 示例
 
-SDK 在 `examples/` 下提供 7 个业务 API 示例，另有 `examples/00_common` 公共连接库。业务示例都复用 `examples/00_common` 中的公共连接流程：
+SDK 在 `examples/` 下提供 8 个业务 API 示例，另有 `examples/00_common` 公共连接库。业务示例都复用 `examples/00_common` 中的公共连接流程：
 
 ```text
 bb_host_connect()
@@ -447,7 +447,7 @@ bb_dev_getlist()
     |
 bb_dev_open()
     |
-bb_ioctl()
+bb_ioctl() / bb_socket_open()
     |
 bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 ```
@@ -1862,6 +1862,73 @@ uart2_baudrate=115200
 ./l4_uart_config -s 0 -g 1
 ```
 
+### 8、Socket 收发示例
+
+`l4_socket_transfer` 用于演示打开设备的 socket port，并发送指定文本或十六进制字节，也可以持续接收 socket 数据直到 `Ctrl-C` 退出。运行前请先启动 `l4_daemon`，并确认 AP/DEV 已完成连接。
+
+#### 8.1 程序参数说明
+
+公共参数：
+
+| 参数 | 长参数 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `-h` | `--help` | 打印帮助 | 无 |
+| `-a <addr>` | `--addr <addr>` | daemon 地址 | `127.0.0.1` |
+| `-p <port>` | `--port <port>` | daemon 端口 | `BB_PORT_DEFAULT` |
+| `-i <index>` | `--index <index>` | 设备序号 | `0` |
+| `-s <slot>` | `--slot <slot>` | 目标 slot，DEV 侧 `0` 表示 AP | `0` |
+| `-P <port>` | `--socket-port <port>` | socket 逻辑端口 | `1` |
+
+主动作：
+
+| 参数 | 长参数 | 说明 |
+| --- | --- | --- |
+| `-t <text>` | `--text <text>` | 发送文本字节一次，发送完成后等待 1 秒关闭 socket |
+| `-T` | `--text-input` | 文本输入模式，持续读取用户输入的文本行并发送 |
+| `-x <hex>` | `--hex <hex>` | 发送十六进制字节一次，发送完成后等待 1 秒关闭 socket |
+| `-X` | `--hex-input` | 十六进制输入模式，持续读取用户输入的十六进制行并发送 |
+| `-r` | `--recv` | 持续接收数据直到 `Ctrl-C` |
+
+每次运行必须且只能指定一个主动作。`--hex` 和 `--hex-input` 要求每个字节使用两个十六进制字符，例如 `0a`，支持 `01020aff`、`01:02:0a:ff` 或 `01 02 0a ff`。输入模式期间空行会被跳过；文本输入模式按原始文本字节发送，十六进制输入模式按十六进制字节发送。
+
+如果命令行出现 `dquote>`，表示 shell 检测到双引号没有闭合，程序尚未启动。请补齐结尾双引号，或按 `Ctrl-C` 取消后重新输入，例如：
+
+```sh
+./l4_socket_transfer -s 1 -P 1 -t "test"
+```
+
+#### 8.2 示例
+
+接收 socket port 1 上的数据：
+
+```sh
+./l4_socket_transfer -s 0 -P 1 --recv
+```
+
+发送一次文本内容，发送完成后等待 1 秒关闭 socket：
+
+```sh
+./l4_socket_transfer -s 0 -P 1 --text "hello l4"
+```
+
+进入文本输入模式，每输入一行并按回车发送一次，按 `Ctrl-C` 关闭：
+
+```sh
+./l4_socket_transfer -s 0 -P 1 --text-input
+```
+
+发送一次十六进制字节，发送完成后等待 1 秒关闭 socket：
+
+```sh
+./l4_socket_transfer -s 0 -P 1 --hex "01 02 0a ff"
+```
+
+进入十六进制输入模式，每输入一行并按回车发送一次，按 `Ctrl-C` 关闭：
+
+```sh
+./l4_socket_transfer -s 0 -P 1 --hex-input
+```
+
 ## 四、高级构建
 
 通常优先使用 `script/` 下的脚本。只有需要手动控制 CMake 参数、只构建部分 target、或排查交叉编译配置时，才建议直接执行 CMake 命令。
@@ -1904,6 +1971,7 @@ cmake --build L4_Linux_SDK/build/x86_64 --target \
   l4_config_file \
   l4_minidb_config \
   l4_uart_config \
+  l4_socket_transfer \
   l4_daemon \
   -j
 
@@ -1934,6 +2002,7 @@ cmake --build L4_Linux_SDK/build/arm64 --target \
   l4_config_file \
   l4_minidb_config \
   l4_uart_config \
+  l4_socket_transfer \
   l4_daemon \
   -j
 
