@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- 重新引入 `l4_cmd_dbg` 命令行调试工具，支持按设备序号或 MAC 选择设备、列出设备及纯输出模式。
+
 ### Changed
 
 - 同步新原厂 SDK 的 `bb_api.h`、`bb_config.h`、`ioctl_tab.c` 和 `prj_rpc.h`，新增恢复模式、纯净模式消息检查、连接 slot、扩展功率、RF 校准、UART 配置和频点功率偏移等命令定义。

@@ -73,6 +73,7 @@ install/arm64/
 | 后台服务 | `l4_daemon` | 访问设备并为客户端程序提供 RPC 服务 |
 | 应用工具 | `l4_ota_upgrade` | 固件升级工具 |
 | 应用工具 | `l4_tuntap` | 网络透传工具 |
+| 应用工具 | `l4_cmd_dbg` | 设备命令行调试工具 |
 | 示例程序 | `l4_basic_info` | 查询设备基础信息和版本信息 |
 | 示例程序 | `l4_pair_manager` | 图传对频和配对管理 |
 | 示例程序 | `l4_link_monitor` | 链路状态、质量、吞吐、测距查询 |

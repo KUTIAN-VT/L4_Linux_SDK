@@ -135,7 +135,7 @@ L4_Linux_SDK/install/arm64/
 
 常用可执行程序位于 `install/arm64/bin/` 目录，动态库位于 `install/arm64/lib/` 目录。
 
-两个编译脚本默认构建并安装 `ar8030_client`、`l4_daemon`、`l4_tuntap`、`l4_ota_upgrade` 和 `examples/` 下全部业务示例。需要只构建部分 target 或调整 CMake 选项时，请参考“高级构建”章节。
+两个编译脚本默认构建并安装 `ar8030_client`、`l4_daemon`、`l4_cmd_dbg`、`l4_tuntap`、`l4_ota_upgrade` 和 `examples/` 下全部业务示例。需要只构建部分 target 或调整 CMake 选项时，请参考“高级构建”章节。
 
 ### x86_64 最快验证
 
@@ -433,6 +433,54 @@ PING 192.168.144.66 (192.168.144.66) 56(84) bytes of data.
 --- 192.168.144.66 ping statistics ---
 5 packets transmitted, 5 received, 0% packet loss, time 4005ms
 rtt min/avg/max/mdev = 27.678/30.619/34.187/2.471 ms
+```
+
+### 3、命令行调试工具
+
+`l4_cmd_dbg` 用于建立设备调试会话。默认模式从标准输入逐行读取命令并发送到设备，同时将设备返回的调试数据原样输出到终端。
+
+#### 3.1 程序参数说明
+
+除通用的 daemon 地址、端口和设备序号参数外，`l4_cmd_dbg` 还支持以下参数：
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `-m, --mac <mac>` | 按 MAC 地址选择设备，不能与 `-i/--index` 同时使用 | 无 |
+| `-l, --list` | 列出 daemon 当前设备及 MAC 地址后退出 | 关闭 |
+| `-o, --output` | 仅接收设备调试输出，不读取和发送标准输入 | 关闭 |
+
+#### 3.2 标准使用方法
+
+1. 启动 `l4_daemon` 并确认设备已连接。
+2. 多设备环境可先执行 `l4_cmd_dbg -l` 查看设备序号和 MAC 地址。
+3. 使用默认设备、`-i <index>` 或 `-m <mac>` 建立调试会话。
+4. 在交互模式下输入设备固件支持的调试命令；设备离线或标准输入结束后程序退出。
+
+#### 3.3 示例
+
+连接默认设备并进入交互模式：
+
+```sh
+./l4_cmd_dbg
+```
+
+列出设备：
+
+```sh
+./l4_cmd_dbg -l
+```
+
+按设备序号或 MAC 地址选择设备：
+
+```sh
+./l4_cmd_dbg -i 1
+./l4_cmd_dbg -m 00:11:22:33:44:55
+```
+
+只查看设备调试输出：
+
+```sh
+./l4_cmd_dbg -o
 ```
 
 
@@ -1962,6 +2010,7 @@ cmake -S L4_Linux_SDK -B L4_Linux_SDK/build/x86_64 \
 
 cmake --build L4_Linux_SDK/build/x86_64 --target \
   ar8030_client \
+  l4_cmd_dbg \
   l4_tuntap \
   l4_ota_upgrade \
   l4_basic_info \
@@ -1993,6 +2042,7 @@ cmake -S L4_Linux_SDK -B L4_Linux_SDK/build/arm64 \
 
 cmake --build L4_Linux_SDK/build/arm64 --target \
   ar8030_client \
+  l4_cmd_dbg \
   l4_tuntap \
   l4_ota_upgrade \
   l4_basic_info \

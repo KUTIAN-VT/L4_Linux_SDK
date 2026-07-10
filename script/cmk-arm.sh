@@ -19,6 +19,7 @@ cmake -S "${SDK_ROOT}" -B "${BUILD_DIR}" \
 num=$(grep -c processor /proc/cpuinfo)
 cmake --build "${BUILD_DIR}" --target \
     ar8030_client \
+    l4_cmd_dbg \
     l4_tuntap \
     l4_ota_upgrade \
     l4_basic_info \
