@@ -34,7 +34,7 @@ AR8030_API int              bb_dev_close(bb_dev_handle_t* pdev);
 AR8030_API int bb_ioctl(bb_dev_handle_t* dev, uint32_t request, const void* input, void* output);
 AR8030_API int bb_ioctl_ex(bb_dev_handle_t* dev, uint32_t request, const void* input, void* output, int timeout);
 AR8030_API int bb_socket_open(bb_dev_handle_t* dev, bb_slot_e usr, uint32_t port, uint32_t flg, bb_sock_opt_t* opt);
-AR8030_API int bb_socket_write(int sockfd, const void* buff, uint32_t len, int timeout);
+AR8030_API int bb_socket_write(int sockfd, void* buff, uint32_t len, int timeout);
 AR8030_API int bb_socket_read(int sockfd, void* outbuff, uint32_t len, int timeout);
 AR8030_API int bb_socket_close(int sockfd);
 AR8030_API int bb_host_connect_test(const char* addr, int port);

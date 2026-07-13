@@ -24,6 +24,8 @@ typedef enum {
     PRJ_CMD_SET_FREQ_LIST,
     PRJ_CMD_SET_CHAN_PWR_PLUS,
     PRJ_CMD_SET_UART,
+    PRJ_CMD_SET_PWR_EX,
+    PRJ_CMD_SET_FREQ_POWER_LIMIT,
     PRJ_CMD_GET_BAND = 128,
     PRJ_CMD_GET_ROLE,
     PRJ_CMD_GET_AP_MAC,
@@ -38,6 +40,8 @@ typedef enum {
     PRJ_CMD_GET_FREQ_LIST,
     PRJ_CMD_GET_CHAN_PWR_PLUS,
     PRJ_CMD_GET_UART,
+    PRJ_CMD_GET_PWR_EX,
+    PRJ_CMD_GET_FREQ_POWER_LIMIT,
     PRJ_CMD_EVENT_DEMO = 200,
     PRJ_CMD_EVENT_PAIR,
     PRJ_CMD_EVENT_PAIR_STOP,
@@ -207,6 +211,15 @@ typedef struct {
     int8_t pwr_plus[BB_CONFIG_MAX_CHAN_NUM];                    /**<@note chan pwr plus列表*/
 } prj_cmd_set_chan_pwr_plus_t;
 typedef prj_cmd_set_chan_pwr_plus_t prj_cmd_get_chan_pwr_plus_t;
+
+typedef struct {
+    uint8_t link_auto;              /**<@note follow or otherwise*/
+    uint8_t auto_reset;             /**<@note Power after bb reset in auto mode(unit dBm) */
+    uint8_t manu_init;              /**<@note Power when bb init in manu mode(unit dBm) */
+    uint8_t manu_reset;             /**<@note Power after bb reset in manu mode(unit dBm) */
+    uint8_t csma_offset;            /**<@note offset of csma */
+}prj_cmd_set_power_ex_t;
+typedef prj_cmd_set_power_ex_t prj_cmd_get_power_ex_t;
 
 void prj_rpc_init(void);
 

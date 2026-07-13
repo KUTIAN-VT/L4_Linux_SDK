@@ -132,3 +132,31 @@ AR8030_API int bb_net_dev_buf_resize(bb_dev_handle_t* dev, ar_netif_t *ar_netif)
 
     return ret;
 }
+
+AR8030_API int bb_net_dev_enc_update(bb_dev_handle_t* dev, ar_netif_t *ar_netif)
+{
+    int ret = 0;
+    int net_dev_fd = 0;
+
+    if (!ar_netif || (ar_netif->encrypt_en && ar_netif->encrypt_mode >= BB_SOCK_ENCRYPT_MODE_MAX)) {
+        return -1;
+    }
+
+    ar_netif->op_type = AR_NET_OP_ENC_UPDATE;
+
+    net_dev_fd = bb_net_dev_open(dev);
+    if (net_dev_fd < 0) {
+        return -1;
+    }
+
+    ret = cmd_port_handle(net_dev_fd, ar_netif);
+    if (!ret) {
+        printf("Update encrypt params of the net dev success!\n");
+    } else {
+        printf("Update encrypt params of the net dev failed! ret %d\n", ret);
+    }
+
+    bb_net_dev_close(net_dev_fd);
+
+    return ret;
+}

@@ -6,11 +6,14 @@
 #include "unused.h"
 #include "usb_event_list.h"
 #include "usbpack.h"
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
 #define TX_DATA_CHECK 0
+#define SOCK_OPEN_BASE_LEN 12
+#define SOCK_OPEN_ENCRYPT_LEN 45
 
 int find_socket(struct basenode* pnod, void* par)
 {
@@ -170,7 +173,52 @@ static int sp_opt_proc(sock_rpc* priv, usbpack* pack, sock_dev* psoc, int opt, u
     }
 
     if (opt >= so_user_base_start && opt <= so_user_base_end) {
+        if (!psoc || pack->datalen < 0 || (size_t)pack->datalen > sizeof(((socket_ioctl_ctl*)0)->tx_buff)) {
+            usbpack retpack = {
+                .data_v  = NULL,
+                .datalen = 0,
+                .reqid   = reqid,
+                .sta     = -EINVAL,
+            };
+            sock_rpc_send_msg(priv, &retpack);
+            return 0;
+        }
+
+        if (opt == BB_SOCK_ENC_SET) {
+            bb_sock_upd_enc_t* enc = (bb_sock_upd_enc_t*)pack->datapack;
+            if (pack->datalen != (int)sizeof(*enc) ||
+                (enc->encrypt_en && enc->encrypt_mode >= BB_SOCK_ENCRYPT_MODE_MAX)) {
+                usbpack retpack = {
+                    .data_v  = NULL,
+                    .datalen = 0,
+                    .reqid   = reqid,
+                    .sta     = -EINVAL,
+                };
+                sock_rpc_send_msg(priv, &retpack);
+                return 0;
+            }
+        } else if (opt == BB_SOCK_ENC_GET && pack->datalen != 0) {
+            usbpack retpack = {
+                .data_v  = NULL,
+                .datalen = 0,
+                .reqid   = reqid,
+                .sta     = -EINVAL,
+            };
+            sock_rpc_send_msg(priv, &retpack);
+            return 0;
+        }
+
         socket_ioctl_ctl* sic = malloc(sizeof(socket_ioctl_ctl));
+        if (!sic) {
+            usbpack retpack = {
+                .data_v  = NULL,
+                .datalen = 0,
+                .reqid   = reqid,
+                .sta     = -ENOMEM,
+            };
+            sock_rpc_send_msg(priv, &retpack);
+            return 0;
+        }
 
         sic->opt   = opt;
         sic->txflg = 0;
@@ -209,25 +257,81 @@ static int rpc_socket_read_proc(struct rpc_node* rpc, usbpack* pack)
     }
 
     switch (psoc->sock_sta) {
-    case sock_not_init:
+    case sock_not_init: {
+        uint32_t sock_cmd_flg;
+        uint32_t rx_buff_len;
+        uint32_t tx_buff_len;
+        uint8_t  encrypt_mode = BB_SOCK_ENCRYPT_MODE_DEFAULT;
+        uint8_t  key[32]      = {0};
+
+        if (pack->datalen != SOCK_OPEN_BASE_LEN && pack->datalen != SOCK_OPEN_ENCRYPT_LEN) {
+            com_log(COM_SOCKET_COM, "reject socket open: invalid payload length %d", pack->datalen);
+            usbpack retpack = {
+                .reqid   = reqid,
+                .data_v  = NULL,
+                .datalen = 0,
+                .sta     = -EINVAL,
+            };
+            sock_rpc_send_msg(priv, &retpack);
+            break;
+        }
+
+        memcpy(&sock_cmd_flg, pack->datapack, sizeof(sock_cmd_flg));
+        if ((sock_cmd_flg & BB_SOCK_FLAG_ENCRYPT) && pack->datalen != SOCK_OPEN_ENCRYPT_LEN) {
+            com_log(COM_SOCKET_COM, "reject encrypted socket open: missing encryption parameters");
+            usbpack retpack = {
+                .reqid   = reqid,
+                .data_v  = NULL,
+                .datalen = 0,
+                .sta     = -EINVAL,
+            };
+            sock_rpc_send_msg(priv, &retpack);
+            break;
+        }
+        if (!(sock_cmd_flg & BB_SOCK_FLAG_ENCRYPT) && pack->datalen != SOCK_OPEN_BASE_LEN) {
+            com_log(COM_SOCKET_COM, "reject unencrypted socket open: unexpected encryption parameters");
+            usbpack retpack = {
+                .reqid   = reqid,
+                .data_v  = NULL,
+                .datalen = 0,
+                .sta     = -EINVAL,
+            };
+            sock_rpc_send_msg(priv, &retpack);
+            break;
+        }
+
+        memcpy(&rx_buff_len, pack->datapack + 4, sizeof(rx_buff_len));
+        memcpy(&tx_buff_len, pack->datapack + 8, sizeof(tx_buff_len));
+        if (sock_cmd_flg & BB_SOCK_FLAG_ENCRYPT) {
+            memcpy(&encrypt_mode, pack->datapack + 12, sizeof(encrypt_mode));
+            if (encrypt_mode >= BB_SOCK_ENCRYPT_MODE_MAX) {
+                com_log(COM_SOCKET_COM, "reject encrypted socket open: invalid mode %u", encrypt_mode);
+                usbpack retpack = {
+                    .reqid   = reqid,
+                    .data_v  = NULL,
+                    .datalen = 0,
+                    .sta     = -EINVAL,
+                };
+                sock_rpc_send_msg(priv, &retpack);
+                break;
+            }
+            memcpy(key, pack->datapack + 13, sizeof(key));
+        }
+
         psoc->slot         = slot;
         psoc->port         = port;
         psoc->reqid.reqid  = reqid;
-        psoc->sock_cmd_flg = 0b11;
-        psoc->rx_buff_len  = 1024 * 2;
-        psoc->tx_buff_len  = 1024 * 3;
-        if (pack->datalen >= 4) {
-            memcpy(&psoc->sock_cmd_flg, pack->datapack + 0, 4);
-        }
-        if (pack->datalen >= 12) {
-            memcpy(&psoc->rx_buff_len, pack->datapack + 4, 4);
-            memcpy(&psoc->tx_buff_len, pack->datapack + 8, 4);
-        }
+        psoc->sock_cmd_flg = sock_cmd_flg;
+        psoc->rx_buff_len  = rx_buff_len;
+        psoc->tx_buff_len  = tx_buff_len;
+        psoc->encrypt_mode = encrypt_mode;
+        memcpy(psoc->key, key, sizeof(psoc->key));
 
         psoc->sock_sta = sock_need_send_cmd;
         com_log(COM_SOCKET_COM, "socket try init slot %d port %d", psoc->slot, psoc->port);
         dev_node_tx_inotify(rpc->tinfo->plist);
         break;
+    }
     case sock_need_send_cmd:
         com_log(COM_SOCKET_COM, "socket waiting remote cmd!");
         break;

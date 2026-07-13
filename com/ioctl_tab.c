@@ -29,6 +29,7 @@ static const BBIOCTL_TAB cmdtab[] = {
     { BB_GET_DISTC_RESULT,              sizeof(bb_get_distc_result_in_t),           sizeof(bb_get_distc_result_out_t)           },
     { BB_GET_PEER_QUALITY,              sizeof(bb_get_peer_quality_in_t),           sizeof(bb_get_peer_quality_out_t)           },
     { BB_GET_AP_TIME,                   0,                                          sizeof(bb_get_ap_time_out_t)                },
+    { BB_GET_MCS_MODE,                  sizeof(bb_get_mcs_mode_in_t),               sizeof(bb_get_mcs_mode_out_t)               },
     { BB_GET_MCS,                       sizeof(bb_get_mcs_in_t),                    sizeof(bb_get_mcs_out_t)                    },
     { BB_GET_CHAN_INFO,                 0,                                          sizeof(bb_get_chan_info_out_t)              },
     { BB_GET_REG,                       sizeof(bb_get_reg_in_t),                    sizeof(bb_get_reg_out_t)                    },
@@ -57,6 +58,7 @@ static const BBIOCTL_TAB cmdtab[] = {
     { BB_GET_CLEAN_MODE_MSG_CHECK,      sizeof(bb_get_clean_mode_msg_check_in_t),   sizeof(bb_get_clean_mode_msg_check_out_t)   },
     { BB_GET_RECOVERY_MODE,             0,                                          sizeof(bb_get_recovery_mode_out_t)          },
     { BB_GET_DEV_CONNECT_SLOT,          0,                                          sizeof(bb_get_dev_connect_slot_out_t)       },
+    { BB_GET_BANDWIDTH_MODE,            sizeof(bb_get_bandwidth_mode_in_t),         sizeof(bb_get_bandwidth_mode_out_t)         },
 
  // set
     { BB_SET_PAIR_MODE,         sizeof(bb_set_pair_mode_t),            0                                     },
@@ -113,6 +115,7 @@ static const BBIOCTL_TAB cmdtab[] = {
     { BB_SET_CUSTOMER_KEY,      sizeof(bb_set_customer_key_in_t),      0,                                    },
     { BB_SET_CHAN_PWR_PLUS,     sizeof(bb_set_chan_pwr_plus_t),        0,                                    },
     { BB_SET_ENTER_RECOVERY_MODE,   0,                                     0,                                    },
+    { BB_SET_FORCE_UPD_SOCKET_ENC,  sizeof(bb_set_force_upd_socket_enc_t), 0,                                    },
 
     //remote ioctl
     { BB_REMOTE_IOCTL_REQ,      sizeof(bb_remote_ioctl_in_t),          sizeof(bb_remote_ioctl_out_t)         },

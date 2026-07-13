@@ -504,6 +504,8 @@ bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 
 > 2026-06-22 同步说明：`bb_net_dev_create()`、`bb_net_dev_destroy()`、`bb_net_dev_buf_resize()` 已跟随新原厂 SDK 改为接收 `bb_dev_handle_t *`，由 SDK 内部打开和关闭 netdev 设备；旧版直接传入 netdev fd 的调用方式不再使用。
 
+> 2026-07-10 同步说明：SDK 已同步原厂 `ar8030-coolsky-sdk-1.3.02-28-release-20260708` 的 Socket 加密、MCS 模式查询和频宽模式查询接口。`bb_sock_opt_t`、`bb_auto_band_para_t`、`ar_netif_t` 等公共结构发生变化，客户端库、daemon 和应用应作为同一版本整体清理重编。普通 Socket 保持旧版 12 字节创建协议兼容；加密 Socket 要求新版客户端、daemon 和固件配套使用。
+
 ### 1、信息查询示例
 
 `l4_basic_info` 用于查询设备基础信息，包括系统版本、角色、模式、MAC、slot 链路状态和 user phy 状态。
@@ -1914,6 +1916,8 @@ uart2_baudrate=115200
 
 `l4_socket_transfer` 用于演示打开设备的 socket port，并发送指定文本或十六进制字节，也可以持续接收 socket 数据直到 `Ctrl-C` 退出。运行前请先启动 `l4_daemon`，并确认 AP/DEV 已完成连接。
 
+示例支持 `BB_SOCK_ENCRYPT_MODE_DEFAULT`、AES128 和 AES256。收发两端必须使用相同模式和密钥，密钥不会打印到日志。运行中动态更新加密参数可使用 `bb_socket_ioctl_enc_set()` / `bb_socket_ioctl_enc_get()`，或者通过 `BB_SET_FORCE_UPD_SOCKET_ENC` 调用 `bb_ioctl()`；本示例只演示创建 Socket 时设置加密参数。
+
 #### 8.1 程序参数说明
 
 公共参数：
@@ -1926,6 +1930,8 @@ uart2_baudrate=115200
 | `-i <index>` | `--index <index>` | 设备序号 | `0` |
 | `-s <slot>` | `--slot <slot>` | 目标 slot，DEV 侧 `0` 表示 AP | `0` |
 | `-P <port>` | `--socket-port <port>` | socket 逻辑端口 | `1` |
+| 无 | `--encrypt-mode <mode>` | 启用加密，可选 `default`、`aes128`、`aes256` | 不启用 |
+| 无 | `--encrypt-key <hex>` | AES 密钥；AES128 为 32 个十六进制字符，AES256 为 64 个 | 无 |
 
 主动作：
 
@@ -1938,6 +1944,8 @@ uart2_baudrate=115200
 | `-r` | `--recv` | 持续接收数据直到 `Ctrl-C` |
 
 每次运行必须且只能指定一个主动作。`--hex` 和 `--hex-input` 要求每个字节使用两个十六进制字符，例如 `0a`，支持 `01020aff`、`01:02:0a:ff` 或 `01 02 0a ff`。输入模式期间空行会被跳过；文本输入模式按原始文本字节发送，十六进制输入模式按十六进制字节发送。
+
+`default` 模式不使用 `--encrypt-key`。`aes128` 和 `aes256` 必须分别提供 16 字节和 32 字节密钥；仅指定 key 而未指定 `--encrypt-mode` 会被拒绝。
 
 如果命令行出现 `dquote>`，表示 shell 检测到双引号没有闭合，程序尚未启动。请补齐结尾双引号，或按 `Ctrl-C` 取消后重新输入，例如：
 
@@ -1969,6 +1977,14 @@ uart2_baudrate=115200
 
 ```sh
 ./l4_socket_transfer -s 0 -P 1 --hex "01 02 0a ff"
+```
+
+使用 AES128 加密发送文本：
+
+```sh
+./l4_socket_transfer -s 0 -P 1 --encrypt-mode aes128 \
+  --encrypt-key 0102030405060708090a0b0c0d0e0f10 \
+  --text "hello l4"
 ```
 
 进入十六进制输入模式，每输入一行并按回车发送一次，按 `Ctrl-C` 关闭：

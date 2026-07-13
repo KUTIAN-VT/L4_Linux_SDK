@@ -1,5 +1,6 @@
 #include "bb_demo_common.h"
 
+#include "bb_config.h"
 #include "getopt.h"
 #include <ctype.h>
 #include <errno.h>
@@ -31,6 +32,10 @@ typedef struct {
     int socket_port;
     action_t action;
     const char *payload_text;
+    int encrypt_enabled;
+    bb_sock_encrypt_mode_t encrypt_mode;
+    const char *encrypt_key_text;
+    uint8_t encrypt_key[32];
 } options_t;
 
 static volatile sig_atomic_t g_stop = 0;
@@ -63,6 +68,8 @@ static void usage(const char *prog)
     printf("  -i, --index <index>        device index, default: 0\n");
     printf("  -s, --slot <slot>          target slot, default: 0; DEV uses slot 0 as AP\n");
     printf("  -P, --socket-port <port>   socket logical port, default: 1\n");
+    printf("      --encrypt-mode <mode>  enable encryption: default, aes128 or aes256\n");
+    printf("      --encrypt-key <hex>    AES key: 32 hex digits for AES128, 64 for AES256\n");
     printf("\n");
     printf("Actions:\n");
     printf("  -t, --text <text>          send text bytes once, wait 1s, then close\n");
@@ -84,6 +91,7 @@ static void init_options(options_t *opts)
     opts->slot = BB_SLOT_0;
     opts->socket_port = 1;
     opts->action = ACTION_NONE;
+    opts->encrypt_mode = BB_SOCK_ENCRYPT_MODE_DEFAULT;
 }
 
 static int parse_int_range(const char *text, int min_value, int max_value, const char *name, int *out)
@@ -158,6 +166,69 @@ static void print_hex_format_example(void)
     printf("each byte must use two hex digits; separators can be spaces, ':' or ','\n");
 }
 
+static int parse_hex_payload(const char *text, uint8_t **out_payload, size_t *out_len);
+
+static int parse_encrypt_mode(const char *text, bb_sock_encrypt_mode_t *mode)
+{
+    if (strcmp(text, "default") == 0) {
+        *mode = BB_SOCK_ENCRYPT_MODE_DEFAULT;
+    } else if (strcmp(text, "aes128") == 0) {
+        *mode = BB_SOCK_ENCRYPT_MODE_AES128;
+    } else if (strcmp(text, "aes256") == 0) {
+        *mode = BB_SOCK_ENCRYPT_MODE_AES256;
+    } else {
+        printf("invalid encryption mode: %s; use default, aes128 or aes256\n", text);
+        return -1;
+    }
+    return 0;
+}
+
+static int validate_encrypt_options(options_t *opts)
+{
+    uint8_t *key = NULL;
+    size_t key_len = 0;
+    size_t expected_len;
+
+    if (!opts->encrypt_enabled) {
+        if (opts->encrypt_key_text) {
+            printf("--encrypt-key requires --encrypt-mode\n");
+            return -1;
+        }
+        return 0;
+    }
+
+    if (opts->encrypt_mode == BB_SOCK_ENCRYPT_MODE_DEFAULT) {
+        if (opts->encrypt_key_text) {
+            printf("default encryption mode does not use --encrypt-key\n");
+            return -1;
+        }
+        return 0;
+    }
+
+    if (!opts->encrypt_key_text) {
+        printf("%s requires --encrypt-key\n",
+               opts->encrypt_mode == BB_SOCK_ENCRYPT_MODE_AES128 ? "aes128" : "aes256");
+        return -1;
+    }
+
+    if (parse_hex_payload(opts->encrypt_key_text, &key, &key_len)) {
+        printf("invalid --encrypt-key\n");
+        return -1;
+    }
+
+    expected_len = opts->encrypt_mode == BB_SOCK_ENCRYPT_MODE_AES128 ? 16 : 32;
+    if (key_len != expected_len) {
+        printf("invalid encryption key length: got %zu bytes, expected %zu\n", key_len, expected_len);
+        free(key);
+        return -1;
+    }
+
+    memcpy(opts->encrypt_key, key, key_len);
+    memset(key, 0, key_len);
+    free(key);
+    return 0;
+}
+
 static int parse_options(int argc, char **argv, options_t *opts)
 {
     enum {
@@ -171,6 +242,8 @@ static int parse_options(int argc, char **argv, options_t *opts)
         OPT_HEX,
         OPT_HEX_INPUT,
         OPT_RECV,
+        OPT_ENCRYPT_MODE,
+        OPT_ENCRYPT_KEY,
         OPT_HELP,
     };
 
@@ -185,6 +258,8 @@ static int parse_options(int argc, char **argv, options_t *opts)
         {"hex", required_argument, NULL, OPT_HEX},
         {"hex-input", no_argument, NULL, OPT_HEX_INPUT},
         {"recv", no_argument, NULL, OPT_RECV},
+        {"encrypt-mode", required_argument, NULL, OPT_ENCRYPT_MODE},
+        {"encrypt-key", required_argument, NULL, OPT_ENCRYPT_KEY},
         {"help", no_argument, NULL, OPT_HELP},
         {NULL, 0, NULL, 0},
     };
@@ -258,6 +333,15 @@ static int parse_options(int argc, char **argv, options_t *opts)
                 return -1;
             }
             break;
+        case OPT_ENCRYPT_MODE:
+            if (parse_encrypt_mode(optarg, &opts->encrypt_mode)) {
+                return -1;
+            }
+            opts->encrypt_enabled = 1;
+            break;
+        case OPT_ENCRYPT_KEY:
+            opts->encrypt_key_text = optarg;
+            break;
         case ':':
             print_missing_argument(optopt);
             return -1;
@@ -295,7 +379,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
         return -1;
     }
 
-    return 0;
+    return validate_encrypt_options(opts);
 }
 
 static int is_hex_separator(char c)
@@ -417,7 +501,7 @@ static void trim_line_end(char *line)
     }
 }
 
-static int write_payload(int sockfd, const uint8_t *payload, size_t payload_len)
+static int write_payload(int sockfd, uint8_t *payload, size_t payload_len)
 {
     int written;
 
@@ -448,7 +532,7 @@ static int send_interactive_line(int sockfd, action_t action, char *line)
     }
 
     if (action == ACTION_SEND_TEXT_INPUT) {
-        return write_payload(sockfd, (const uint8_t *)line, strlen(line));
+        return write_payload(sockfd, (uint8_t *)line, strlen(line));
     }
 
     ret = parse_hex_payload(line, &hex_payload, &payload_len);
@@ -463,25 +547,50 @@ static int send_interactive_line(int sockfd, action_t action, char *line)
     return ret;
 }
 
-static int open_tx_socket(bb_dev_handle_t *handle, const options_t *opts)
+static int open_transfer_socket(bb_dev_handle_t *handle,
+                                const options_t *opts,
+                                uint32_t flags,
+                                const char *direction)
 {
+    bb_sock_opt_t sock_opt = {0};
+    bb_sock_opt_t *sock_opt_ptr = NULL;
     int sockfd;
+
+    if (opts->encrypt_enabled) {
+        sock_opt.tx_buf_size = BB_CONFIG_MAC_TX_BUF_SIZE;
+        sock_opt.rx_buf_size = BB_CONFIG_MAC_RX_BUF_SIZE;
+        sock_opt.encrypt_mode = (uint8_t)opts->encrypt_mode;
+        memcpy(sock_opt.key, opts->encrypt_key, sizeof(sock_opt.key));
+        sock_opt_ptr = &sock_opt;
+        flags |= BB_SOCK_FLAG_ENCRYPT;
+    }
 
     sockfd = bb_socket_open(handle,
                             (bb_slot_e)opts->slot,
                             (uint32_t)opts->socket_port,
-                            BB_SOCK_FLAG_TX,
-                            NULL);
+                            flags,
+                            sock_opt_ptr);
+    memset(sock_opt.key, 0, sizeof(sock_opt.key));
     if (sockfd < 0) {
-        printf("bb_socket_open TX failed, ret=%d\n", sockfd);
+        printf("bb_socket_open %s failed, ret=%d\n", direction, sockfd);
         return -1;
     }
 
-    printf("socket opened: fd=%d slot=%d port=%d mode=TX\n", sockfd, opts->slot, opts->socket_port);
+    printf("socket opened: fd=%d slot=%d port=%d mode=%s encryption=%s\n",
+           sockfd,
+           opts->slot,
+           opts->socket_port,
+           direction,
+           opts->encrypt_enabled ? "enabled" : "disabled");
     return sockfd;
 }
 
-static int send_once(bb_dev_handle_t *handle, const options_t *opts, const uint8_t *payload, size_t payload_len)
+static int open_tx_socket(bb_dev_handle_t *handle, const options_t *opts)
+{
+    return open_transfer_socket(handle, opts, BB_SOCK_FLAG_TX, "TX");
+}
+
+static int send_once(bb_dev_handle_t *handle, const options_t *opts, uint8_t *payload, size_t payload_len)
 {
     int sockfd;
     int ret = 0;
@@ -546,19 +655,13 @@ static int receive_loop(bb_dev_handle_t *handle, const options_t *opts)
     uint64_t total = 0;
     int sockfd;
 
-    sockfd = bb_socket_open(handle,
-                            (bb_slot_e)opts->slot,
-                            (uint32_t)opts->socket_port,
-                            BB_SOCK_FLAG_RX,
-                            NULL);
+    sockfd = open_transfer_socket(handle, opts, BB_SOCK_FLAG_RX, "RX");
     if (sockfd < 0) {
-        printf("bb_socket_open RX failed, ret=%d\n", sockfd);
         return -1;
     }
 
     setup_signal_handlers();
 
-    printf("socket opened: fd=%d slot=%d port=%d mode=RX\n", sockfd, opts->slot, opts->socket_port);
     printf("receiving, press Ctrl-C to stop\n");
 
     while (!g_stop) {
@@ -582,7 +685,7 @@ int main(int argc, char **argv)
     options_t opts;
     bb_demo_context_t ctx;
     uint8_t *hex_payload = NULL;
-    const uint8_t *payload = NULL;
+    uint8_t *payload = NULL;
     size_t payload_len = 0;
     int ret;
 
@@ -595,7 +698,7 @@ int main(int argc, char **argv)
     }
 
     if (opts.action == ACTION_SEND_TEXT_ONCE) {
-        payload = (const uint8_t *)opts.payload_text;
+        payload = (uint8_t *)opts.payload_text;
         payload_len = strlen(opts.payload_text);
     } else if (opts.action == ACTION_SEND_HEX_ONCE) {
         if (parse_hex_payload(opts.payload_text, &hex_payload, &payload_len)) {
@@ -622,5 +725,6 @@ int main(int argc, char **argv)
 
     bb_demo_close(&ctx);
     free(hex_payload);
+    memset(opts.encrypt_key, 0, sizeof(opts.encrypt_key));
     return ret ? 1 : 0;
 }

@@ -51,6 +51,8 @@ typedef struct sock_dev {
     uint32_t sock_cmd_flg; ///< @ref SOCKET_CONF
     uint32_t rx_buff_len;
     uint32_t tx_buff_len;
+    uint8_t  encrypt_mode;
+    uint8_t  key[32];
     int      slot;
     int      port;
 

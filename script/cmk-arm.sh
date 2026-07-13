@@ -29,6 +29,7 @@ cmake --build "${BUILD_DIR}" --target \
     l4_config_file \
     l4_minidb_config \
     l4_uart_config \
+    l4_socket_transfer \
     l4_daemon \
     -j${num}
 cmake --install "${BUILD_DIR}"

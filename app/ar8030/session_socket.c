@@ -213,6 +213,11 @@ AR8030_API int bb_socket_open(bb_dev_handle_t* pdev, bb_slot_e slot, uint32_t po
         printf("bb socket open using err flg\n");
         return -1;
     }
+    if ((flg & BB_SOCK_FLAG_ENCRYPT) &&
+        (!opt || opt->encrypt_mode >= BB_SOCK_ENCRYPT_MODE_MAX)) {
+        printf("bb encrypted socket open using invalid options\n");
+        return -EINVAL;
+    }
 
     SOCK_SESSION* sock = create_socket_sess(pdev, slot, port, flg);
     if (!sock) {
@@ -231,29 +236,40 @@ AR8030_API int bb_socket_open(bb_dev_handle_t* pdev, bb_slot_e slot, uint32_t po
     }
 
     // 启动创建socket
-    uint8_t       buff[12];
+    uint8_t       size = 0;
+    uint8_t       buff[45] = {0};
     uint32_t      req = 4 << 24 | so_open << 16 | slot << 8 | port << 0;
-    bb_sock_opt_t tmpopt;
+    bb_sock_opt_t tmpopt = {0};
     tmpopt.rx_buf_size = BB_CONFIG_MAC_RX_BUF_SIZE;
     tmpopt.tx_buf_size = BB_CONFIG_MAC_TX_BUF_SIZE;
     if (!opt) {
         opt = &tmpopt;
     }
 
-    flg &= (BB_SOCK_FLAG_TX | BB_SOCK_FLAG_RX);
+    flg &= (BB_SOCK_FLAG_TX | BB_SOCK_FLAG_RX | BB_SOCK_FLAG_ENCRYPT);
     /**
      * Only send flag and tx/rx buffer size
-     * |--flag--|--tx_buf--|--rx_buf--|
-     * |-4bytes-|--4bytes--|--4bytes--|
+     * |--flag--|--tx_buf--|--rx_buf--|--encrypt_mode--|--encrypt_key--|
+     * |-4bytes-|--4bytes--|--4bytes--|------1 byte----|----32 bytes---|
     */
-    memcpy(buff + 0, &flg, 4);
-    memcpy(buff + 4, &opt->tx_buf_size, 4);
-    memcpy(buff + 8, &opt->rx_buf_size, 4);
+    memcpy(buff + size, &flg, 4);
+    size += 4;
+    memcpy(buff + size, &opt->tx_buf_size, 4);
+    size += 4;
+    memcpy(buff + size, &opt->rx_buf_size, 4);
+    size += 4;
+
+    if (flg & BB_SOCK_FLAG_ENCRYPT) {
+        memcpy(buff + size, &opt->encrypt_mode, 1);
+        size += 1;
+        memcpy(buff + size, opt->key, sizeof(opt->key));
+        size += sizeof(opt->key);
+    }
 
     usbpack pack = {
         .reqid   = req,
         .data_v  = buff,
-        .datalen = 12,
+        .datalen = size,
     };
 
     int     sta = 0;
@@ -319,7 +335,7 @@ static void wk_wr(SOCK_SESSION* sock, usbpack* pack, void* prv)
     }
 }
 
-static int _bb_socket_write(SOCK_SESSION* sock, const void* inbuff, uint32_t len, struct timespec* timeout)
+static int _bb_socket_write(SOCK_SESSION* sock, void* inbuff, uint32_t len, struct timespec* timeout)
 {
     uint32_t req = 4 << 24 | so_write << 16 | sock->sock_slot << 8 | sock->sock_port << 0;
 
@@ -377,7 +393,7 @@ static int _bb_socket_write(SOCK_SESSION* sock, const void* inbuff, uint32_t len
 
 extern int max_payload(void);
 
-AR8030_API int bb_socket_write(int sockfd, const void* inbuff, uint32_t len, int timeout)
+AR8030_API int bb_socket_write(int sockfd, void* inbuff, uint32_t len, int timeout)
 {
     SOCK_SESSION* sock = socket_get_session(sockfd);
     uint32_t      len0 = len;
@@ -573,11 +589,16 @@ static void wk_with_sp_fix_rxlen(SOCK_SESSION* sock, usbpack* pack, void* prv)
         return;
     }
 
-    if (pack->datalen != ptmp->rx_len || pack->sta != 0) {
+    if (pack->sta != 0) {
         printf("query buff len err!!\n");
         ptmp->sta = pack->sta;
+    } else if (pack->datalen != ptmp->rx_len) {
+        printf("query buff len err!!\n");
+        ptmp->sta = -EMSGSIZE;
     } else {
-        memcpy(ptmp->buff, pack->data_v, pack->datalen);
+        if (pack->datalen) {
+            memcpy(ptmp->buff, pack->data_v, pack->datalen);
+        }
         ptmp->sta = 0;
     }
     pthread_cond_broadcast(&sock->socv);
@@ -616,9 +637,10 @@ static int bb_socket_com_opt(SOCK_SESSION* sock, void* value, int txlen, int rxl
     list_del(&wu.node);
     if (sock->exit_flg) {
         pthread_cond_broadcast(&sock->exitcv);
+        tmp.sta = -ECONNRESET;
     }
     pthread_mutex_unlock(&sock->somtx);
-    return 0;
+    return tmp.sta;
 }
 
 AR8030_API int bb_socket_ioctl(int sockfd, bb_sock_cmd_e cmd, void* value)
@@ -660,8 +682,37 @@ AR8030_API int bb_socket_ioctl(int sockfd, bb_sock_cmd_e cmd, void* value)
     case BB_SOCK_IOCTL_ECHO: {
         return bb_socket_com_opt(sock, value, 4, 4, BB_SOCK_IOCTL_ECHO, wk_with_sp_fix_rxlen);
     } break;
+    case BB_SOCK_ENC_SET: {
+        bb_sock_upd_enc_t* enc = (bb_sock_upd_enc_t*)value;
+        if (!enc || (enc->encrypt_en && enc->encrypt_mode >= BB_SOCK_ENCRYPT_MODE_MAX)) {
+            return -EINVAL;
+        }
+        return bb_socket_com_opt(sock, value, sizeof(*enc), 0, BB_SOCK_ENC_SET, wk_with_sp_fix_rxlen);
+    } break;
+    case BB_SOCK_ENC_GET: {
+        if (!value) {
+            return -EINVAL;
+        }
+        return bb_socket_com_opt(sock, value, 0, sizeof(bb_sock_upd_enc_t), BB_SOCK_ENC_GET, wk_with_sp_fix_rxlen);
+    } break;
     default:
         printf("bb_socket_ioctl unknown cmd = 0x%02x\n", cmd);
         return -2;
     }
+}
+
+AR8030_API int bb_socket_ioctl_enc_set(int sockfd, void* ipt, int ipt_size, void* opt, int opt_size)
+{
+    if (!ipt || ipt_size != (int)sizeof(bb_sock_upd_enc_t) || opt || opt_size != 0) {
+        return -EINVAL;
+    }
+    return bb_socket_ioctl(sockfd, BB_SOCK_ENC_SET, ipt);
+}
+
+AR8030_API int bb_socket_ioctl_enc_get(int sockfd, void* ipt, int ipt_size, void* opt, int opt_size)
+{
+    if (ipt || ipt_size != 0 || !opt || opt_size != (int)sizeof(bb_sock_upd_enc_t)) {
+        return -EINVAL;
+    }
+    return bb_socket_ioctl(sockfd, BB_SOCK_ENC_GET, opt);
 }

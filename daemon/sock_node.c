@@ -211,7 +211,7 @@ static int sock_dev_bb_ioctl(struct basenode* pnod, struct usbpack* pack, sock_d
         sock_rpc_send_msg(priv, pack);
         free(sic);
     } else {
-        com_log(COM_SOCKET_COM, "unknown user msg opt = %d", sic->opt);
+        com_log(COM_SOCKET_COM, "unknown user msg opt = %d", opt);
     }
 
     return 0;
@@ -452,13 +452,22 @@ static int _sock_dev_pack_make(struct basenode* pnod, unsigned char* buff, int l
 
     switch (psock->sock_sta) {
     case sock_need_send_cmd: {
-        uint8_t bufftmp[12];
+        uint8_t bufftmp[45];
         int     cmd_len = 0;
 
-        memcpy(bufftmp + 0, &psock->sock_cmd_flg, 4);
-        memcpy(bufftmp + 4, &psock->rx_buff_len, 4);
-        memcpy(bufftmp + 8, &psock->tx_buff_len, 4);
-        cmd_len = 12;
+        memcpy(bufftmp + cmd_len, &psock->sock_cmd_flg, 4);
+        cmd_len += 4;
+        memcpy(bufftmp + cmd_len, &psock->rx_buff_len, 4);
+        cmd_len += 4;
+        memcpy(bufftmp + cmd_len, &psock->tx_buff_len, 4);
+        cmd_len += 4;
+
+        if (psock->sock_cmd_flg & BB_SOCK_FLAG_ENCRYPT) {
+            memcpy(bufftmp + cmd_len, &psock->encrypt_mode, 1);
+            cmd_len += 1;
+            memcpy(bufftmp + cmd_len, psock->key, sizeof(psock->key));
+            cmd_len += sizeof(psock->key);
+        }
 
         usbpack pack = {
             .reqid    = BB_REQ_SOCKET << 24 | so_open << 16 | psock->slot << 8 | psock->port,
@@ -547,6 +556,8 @@ static int sock_dev_deinit(struct basenode* pnod)
         free(sic);
     }
 
+    memset(psock->key, 0, sizeof(psock->key));
+
     pthread_mutex_unlock(&psock->mtx_tx_buf);
 
     if (sockrpc) {
@@ -608,6 +619,8 @@ int sock_node_start(sock_dev* psock, struct sock_rpc* prpc)
     psock->has_opened     = 0;
     psock->nameflg        = 0;
     psock->ioctl_act_flg  = 0;
+    psock->encrypt_mode   = BB_SOCK_ENCRYPT_MODE_DEFAULT;
+    memset(psock->key, 0, sizeof(psock->key));
 
     INIT_LIST_HEAD(&psock->sock_ioctl_list);
 

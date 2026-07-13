@@ -23,16 +23,19 @@
 /**网络设备创建数据结构(linux)*/
 PACK(typedef struct ar_netif_s
 {
-    unsigned char op_type;                          /** <@note Operations, refers to AR_NET_OP_xxx */
+    unsigned char op_type;                          /** <@note Operations, refers to AR_NET_OP_xxx, for ALL operations */
     unsigned char netif_id;                         /** <@note (OUT)netif id (create or lookup) */
-    unsigned char type;                             /** <@note Port/Vlan, refers to AR_NET_NETIF_T_xxx */
-    unsigned char slot;                             /** <@note bb socket slot */
-    unsigned short vlan;                            /** <@note vlan when type is AR_NET_NETIF_T_VLAN */
-    unsigned short socket_port;                     /** <@note bb socket port */
-    unsigned char mac[AR_NET_MAC_LEN];              /** <@note mac of the net device */
-    unsigned char name[AR_NET_MAX_NET_NAME_LEN];    /** <@note name of the net device */
-    unsigned long tx_buf_size;                      /** <@note Tx buffer of the socket */
-    unsigned long rx_buf_size;                      /** <@note Rx buffer of the socket */
+    unsigned char type;                             /** <@note Port/Vlan, refers to AR_NET_NETIF_T_xxx, for ALL operations */
+    unsigned char slot;                             /** <@note bb socket slot, for ALL operations */
+    unsigned short vlan;                            /** <@note vlan when type is AR_NET_NETIF_T_VLAN, for ALL operations */
+    unsigned short socket_port;                     /** <@note bb socket port, for ALL operations */
+    unsigned char mac[AR_NET_MAC_LEN];              /** <@note mac of the net device, for [CREATE] */
+    unsigned char name[AR_NET_MAX_NET_NAME_LEN];    /** <@note name of the net device, for [CREATE] */
+    unsigned long tx_buf_size;                      /** <@note Tx buffer of the socket, for [CREATE/RESIZE/GET] */
+    unsigned long rx_buf_size;                      /** <@note Rx buffer of the socket, for [CREATE/RESIZE/GET] */
+    unsigned char encrypt_en;                       /** <@note socket encrypt enable, for [CREATE/ENC_UPDATE/GET] */
+    unsigned char encrypt_mode;                     /** <@note socket encrypt mode, refers to bb_sock_encrypt_mode_t, for [CREATE/ENC_UPDATE/GET] */
+    unsigned char key[32];                          /** <@note socket encrypt key, for [CREATE/ENC_UPDATE/GET] */
 }) ar_netif_t;
 
 /** 网络设备驱动板本号(linux) */
@@ -47,6 +50,7 @@ enum ar_net_operate_code_e
     AR_NET_OP_DESTORY,                              /**<@note 销毁设备*/
     AR_NET_OP_GET,                                  /**<@note 获取设备信息*/
     AR_NET_OP_BUF_RESIZE,                           /**<@note 调整设备socket buffer*/
+    AR_NET_OP_ENC_UPDATE,                           /**<@note 更新设备加密参数*/
     AR_NET_OP_MAX,
 };
 
@@ -56,5 +60,6 @@ AR8030_API int bb_net_dev_close(int net_dev_fd);
 AR8030_API int bb_net_dev_create(bb_dev_handle_t* dev, ar_netif_t *ar_netif);
 AR8030_API int bb_net_dev_destroy(bb_dev_handle_t* dev, unsigned char slot, unsigned short socket_port);
 AR8030_API int bb_net_dev_buf_resize(bb_dev_handle_t* dev, ar_netif_t *ar_netif);
+AR8030_API int bb_net_dev_enc_update(bb_dev_handle_t* dev, ar_netif_t *ar_netif);
 
 #endif

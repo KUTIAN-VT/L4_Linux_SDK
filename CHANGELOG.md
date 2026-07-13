@@ -7,6 +7,8 @@
 ### Added
 
 - 重新引入 `l4_cmd_dbg` 命令行调试工具，支持按设备序号或 MAC 选择设备、列出设备及纯输出模式。
+- 同步原厂 `1.3.02-28-release-20260708` 的 Socket 加密、MCS 模式查询和频宽模式查询接口。
+- 为 `l4_socket_transfer` 增加 default、AES128、AES256 加密参数示例。
 
 ### Changed
 
@@ -14,6 +16,14 @@
 - 同步 `bb_net_dev_*` API，netdev 创建、销毁和缓冲区调整接口改为接收 `bb_dev_handle_t *`。
 - 同步 Linux socket 连接超时处理和 USB/UART 后端控制结构初始化修复。
 - 修复 `ar_net_api.h` 安装路径，并调整 ARM64 脚本目标列表，保证全量安装阶段可找到所有 install 目标。
+- Socket 创建协议按普通 12 字节、加密 45 字节区分，保持普通 Socket 与旧客户端兼容。
+- 同步 netdev 加密参数和 `bb_net_dev_enc_update()`；运行时需要匹配版本的外部 Linux 内核驱动。
+- 公共 Socket、信道和 netdev 结构尺寸已变化，应用需要与客户端库和 daemon 整体清理重编。
+
+### Fixed
+
+- 拒绝长度异常或加密模式无效的 Socket 创建请求，避免原厂短包解析路径越界读取密钥。
+- 加密 Socket 打开前校验并清零配置，避免发送未初始化的加密模式或密钥。
 
 ## [v0.2.0] - 2026-06-09
 

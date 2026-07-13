@@ -81,6 +81,7 @@ install/arm64/
 | 示例程序 | `l4_config_file` | 配置文件导入、导出和恢复 |
 | 示例程序 | `l4_minidb_config` | MiniDB 持久化配置读写 |
 | 示例程序 | `l4_uart_config` | UART 配置读写 |
+| 示例程序 | `l4_socket_transfer` | 普通或加密 Socket 数据收发 |
 
 `examples/00_common` 是示例公共库，封装连接 daemon、枚举设备和打开设备的公共流程，不是可单独运行的示例程序。
 
@@ -214,4 +215,3 @@ cd L4_Linux_SDK
 - 查 API 结构体和命令字：查看 `com/bb_api.h`、`com/prj_rpc.h` 和 `app/ar8030/ar_net_api.h`，并结合 `examples/` 中对应示例理解调用方式。
 - 使用应用工具：阅读开发手册中的“应用工具”章节。
 - 手动 CMake 构建和排错：阅读开发手册中的“高级构建”和“常见问题”章节。
-
