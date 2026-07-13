@@ -74,7 +74,7 @@ static const char *band_name(uint8_t band)
     }
 }
 
-static const char *band_mode_name(uint8_t mode)
+static const char *auto_mode_name(uint8_t mode)
 {
     switch (mode) {
     case 0:
@@ -275,6 +275,8 @@ static void usage(const char *prog)
     printf("  -Q              query BB_GET_USER_QUALITY\n");
     printf("  -q              query BB_GET_PEER_QUALITY\n");
     printf("  -M              query BB_GET_MCS for TX and RX\n");
+    printf("  -m              query BB_GET_MCS_MODE\n");
+    printf("  -W              query BB_GET_BANDWIDTH_MODE\n");
     printf("  -P              query BB_GET_CUR_POWER\n");
     printf("  -C              query BB_GET_CHAN_INFO\n");
     printf("  -R              query peer device by remote ioctl through -s <slot>\n");
@@ -573,6 +575,74 @@ static int query_mcs(bb_dev_handle_t *handle, int slot, int remote_slot)
     return query_mcs_dir(handle, slot, BB_DIR_RX, remote_slot);
 }
 
+static int query_mcs_mode(bb_dev_handle_t *handle, int slot, int remote_slot)
+{
+    bb_get_mcs_mode_in_t input;
+    bb_get_mcs_mode_out_t output;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    input.slot = (uint8_t)slot;
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_MCS_MODE,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
+    if (ret) {
+        if (remote_slot >= 0) {
+            printf("BB_GET_MCS_MODE remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_MCS_MODE failed, ret=%d\n", ret);
+        }
+        return ret;
+    }
+
+    print_query_title("BB_GET_MCS_MODE", remote_slot);
+    printf("slot=%d auto_mode=%s(%u)\n",
+           slot,
+           auto_mode_name(output.auto_mode),
+           output.auto_mode);
+    return 0;
+}
+
+static int query_bandwidth_mode(bb_dev_handle_t *handle, int slot, int remote_slot)
+{
+    bb_get_bandwidth_mode_in_t input;
+    bb_get_bandwidth_mode_out_t output;
+    int ret;
+
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    input.slot = (uint8_t)slot;
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_BANDWIDTH_MODE,
+                             &input,
+                             sizeof(input),
+                             &output,
+                             sizeof(output),
+                             remote_slot);
+    if (ret) {
+        if (remote_slot >= 0) {
+            printf("BB_GET_BANDWIDTH_MODE remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_BANDWIDTH_MODE failed, ret=%d\n", ret);
+        }
+        return ret;
+    }
+
+    print_query_title("BB_GET_BANDWIDTH_MODE", remote_slot);
+    printf("slot=%d auto_mode=%s(%u)\n",
+           slot,
+           auto_mode_name(output.auto_mode),
+           output.auto_mode);
+    return 0;
+}
+
 static int query_cur_power(bb_dev_handle_t *handle, int user, int remote_slot)
 {
     bb_get_cur_pwr_in_t input;
@@ -674,7 +744,7 @@ static int query_band_info(bb_dev_handle_t *handle, int remote_slot)
 
     print_query_title("BB_GET_BAND_INFO", remote_slot);
     printf("band_mode=%s(%u) work_band=%s(%u)\n",
-           band_mode_name(output.band_mode),
+           auto_mode_name(output.band_mode),
            output.band_mode,
            band_name(output.work_band),
            output.work_band);
@@ -799,6 +869,8 @@ int main(int argc, char **argv)
     int do_user_quality = 0;
     int do_peer_quality = 0;
     int do_mcs = 0;
+    int do_mcs_mode = 0;
+    int do_bandwidth_mode = 0;
     int do_power = 0;
     int do_chan = 0;
     int do_band = 0;
@@ -813,7 +885,7 @@ int main(int argc, char **argv)
     bb_demo_context_t ctx;
     bb_get_status_out_t status;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMPCBTDVR")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMmWPCBTDVR")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -839,6 +911,8 @@ int main(int argc, char **argv)
             do_user_quality = 1;
             do_peer_quality = 1;
             do_mcs = 1;
+            do_mcs_mode = 1;
+            do_bandwidth_mode = 1;
             do_power = 1;
             do_chan = 1;
             do_band = 1;
@@ -857,6 +931,12 @@ int main(int argc, char **argv)
             break;
         case 'M':
             do_mcs = 1;
+            break;
+        case 'm':
+            do_mcs_mode = 1;
+            break;
+        case 'W':
+            do_bandwidth_mode = 1;
             break;
         case 'P':
             do_power = 1;
@@ -886,12 +966,14 @@ int main(int argc, char **argv)
     }
 
     if (!do_status && !do_user_quality && !do_peer_quality && !do_mcs &&
-        !do_power && !do_chan && !do_band && !do_throughput && !do_distc_result &&
-        !do_1v1_info) {
+        !do_mcs_mode && !do_bandwidth_mode && !do_power && !do_chan && !do_band &&
+        !do_throughput && !do_distc_result && !do_1v1_info) {
         do_status = 1;
         do_user_quality = 1;
         do_peer_quality = 1;
         do_mcs = 1;
+        do_mcs_mode = 1;
+        do_bandwidth_mode = 1;
         do_power = 1;
         do_chan = 1;
         do_band = 1;
@@ -957,6 +1039,20 @@ int main(int argc, char **argv)
 
     if (do_mcs && link_ready) {
         ret = query_mcs(ctx.handle, slot, remote ? slot : -1);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_mcs_mode) {
+        ret = query_mcs_mode(ctx.handle, slot, remote ? slot : -1);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_bandwidth_mode) {
+        ret = query_bandwidth_mode(ctx.handle, slot, remote ? slot : -1);
         if (ret) {
             goto done;
         }

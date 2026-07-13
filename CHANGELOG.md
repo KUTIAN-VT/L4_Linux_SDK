@@ -9,6 +9,7 @@
 - 重新引入 `l4_cmd_dbg` 命令行调试工具，支持按设备序号或 MAC 选择设备、列出设备及纯输出模式。
 - 同步原厂 `1.3.02-28-release-20260708` 的 Socket 加密、MCS 模式查询和频宽模式查询接口。
 - 为 `l4_socket_transfer` 增加 default、AES128、AES256 加密参数示例。
+- 为 `l4_link_monitor` 增加 MCS 模式和频宽模式的本机、远端及全量查询。
 
 ### Changed
 

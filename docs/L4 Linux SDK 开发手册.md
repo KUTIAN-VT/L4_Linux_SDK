@@ -722,7 +722,7 @@ DEV 侧手动设置 AP MAC：
 
 ### 3、链路监控示例
 
-`l4_link_monitor` 用于在配对完成后读取链路状态、信号质量、MCS、功率、信道、频段、吞吐和测距结果。
+`l4_link_monitor` 用于读取链路状态、信号质量、MCS、MCS 模式、频宽模式、功率、信道、频段、吞吐和测距结果。
 
 #### 3.1 程序参数说明
 
@@ -734,6 +734,8 @@ DEV 侧手动设置 AP MAC：
 | `-Q`        | 查询 `BB_GET_USER_QUALITY`   | 无    |
 | `-q`        | 查询 `BB_GET_PEER_QUALITY`   | 无    |
 | `-M`        | 查询 `BB_GET_MCS`            | 无    |
+| `-m`        | 查询 `BB_GET_MCS_MODE`       | 无    |
+| `-W`        | 查询 `BB_GET_BANDWIDTH_MODE` | 无    |
 | `-P`        | 查询 `BB_GET_CUR_POWER`      | 无    |
 | `-C`        | 查询 `BB_GET_CHAN_INFO`      | 无    |
 | `-R`        | 通过远程 ioctl 查询 `-s <slot>` 指定的对端，支持全量和单项查询 | 无    |
@@ -745,16 +747,16 @@ DEV 侧手动设置 AP MAC：
 | `-u <user>` | 指定 `-Q`/`-P` 的物理用户；未指定时 `-Q` 默认 AP=0、DEV=8，`-P` 默认 AP=8、DEV=0 | 见说明 |
 
 
-链路质量、MCS、功率、吞吐和测距结果等细节需要在配对完成、链路连接后读取。程序会先查询 `BB_GET_STATUS` 判断目标 slot 是否可用。未指定 `-u` 时会按实际查询端角色选择默认 user：`-Q` 在 AP 为 0、DEV 为 8；`-P` 在 AP 为 8、DEV 为 0。
+链路质量、实时 MCS、功率、吞吐和测距结果等细节需要在配对完成、链路连接后读取。程序会先查询 `BB_GET_STATUS` 判断目标 slot 是否可用。MCS 模式和频宽模式属于配置状态，不受配对/连接状态检查限制。未指定 `-u` 时会按实际查询端角色选择默认 user：`-Q` 在 AP 为 0、DEV 为 8；`-P` 在 AP 为 8、DEV 为 0。
 
 #### 3.2 标准使用方法
 
 1. 启动 `l4_daemon`。
 2. 使用 `l4_pair_manager` 完成 AP 和 DEV 配对。
 3. 执行 `l4_link_monitor` 查询全量链路信息。
-4. 根据需要通过 `-S/-Q/-M/-T/-V` 等参数查询指定信息。
+4. 根据需要通过 `-S/-Q/-M/-m/-W/-T/-V` 等参数查询指定信息。
 5. AP 侧通过 `-s` 指定目标 DEV 所在 slot；DEV 侧通常使用 `-s 0` 查看 AP 方向。
-6. 默认查询本机信息；需要查询对端时增加 `-R -s <slot>`，可配合 `-A/-S/-Q/-q/-M/-P/-C/-B/-T/-D/-V` 使用。
+6. 默认查询本机信息；需要查询对端时增加 `-R -s <slot>`，可配合 `-A/-S/-Q/-q/-M/-m/-W/-P/-C/-B/-T/-D/-V` 使用。
 
 #### 3.3 示例
 
@@ -812,7 +814,9 @@ user[8]: snr_raw=1949 snr_db=17.34 dB ldpc=0/2 gain_a=32 gain_b=40
 slot[0]: snr_raw=2716 snr_db=18.78 dB ldpc=0/96 gain_a=36 gain_b=34
 ```
 
-##### 3.3.4 查询 MCS
+##### 3.3.4 查询 MCS 和控制模式
+
+查询实时 MCS：
 
 ```sh
 ./l4_link_monitor -M
@@ -824,6 +828,22 @@ slot[0]: snr_raw=2716 snr_db=18.78 dB ldpc=0/96 gain_a=36 gain_b=34
 [BB_GET_MCS] slot=0
   TX: mcs_raw=2 mcs_real=0 theory_throughput=236 kbps
   RX: mcs_raw=11 mcs_real=9 theory_throughput=11493 kbps
+```
+
+查询 MCS 控制模式和频宽控制模式：
+
+```sh
+./l4_link_monitor -m -W
+```
+
+正常输出示例：
+
+```text
+[BB_GET_MCS_MODE]
+slot=0 auto_mode=AUTO(1)
+
+[BB_GET_BANDWIDTH_MODE]
+slot=0 auto_mode=MANUAL(0)
 ```
 
 ##### 3.3.5 查询天线发射功率
@@ -916,7 +936,7 @@ chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
   ...
 ```
 
-`-R` 会将查询命令封装进 `BB_REMOTE_IOCTL_REQ`，由 `-s` 指定的对端 slot 执行查询。不带 `-R` 时仍查询本机信息。`-R` 支持 `-A` 和所有单项查询参数，包括 `-S`、`-Q`、`-q`、`-M`、`-P`、`-C`、`-B`、`-T`、`-D`、`-V`。链路细节查询会先读取实际查询端的 `BB_GET_STATUS` 做 pair/connect 检查。
+`-R` 会将查询命令封装进 `BB_REMOTE_IOCTL_REQ`，由 `-s` 指定的对端 slot 执行查询。不带 `-R` 时仍查询本机信息。`-R` 支持 `-A` 和所有单项查询参数，包括 `-S`、`-Q`、`-q`、`-M`、`-m`、`-W`、`-P`、`-C`、`-B`、`-T`、`-D`、`-V`。链路细节查询会先读取实际查询端的 `BB_GET_STATUS` 做 pair/connect 检查；MCS 模式和频宽模式查询不受该检查限制。
 
 ##### 3.3.7 查询频段信息
 
