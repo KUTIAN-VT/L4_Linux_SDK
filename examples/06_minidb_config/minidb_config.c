@@ -23,6 +23,7 @@ typedef enum {
     ACTION_GET_SLOT_MAC,
     ACTION_GET_BAND,
     ACTION_GET_PWR,
+    ACTION_GET_PWR_EX,
     ACTION_GET_FREQ_LIST,
     ACTION_SET_ROLE,
     ACTION_SET_AP_MAC,
@@ -72,12 +73,13 @@ static void usage(const char *prog)
     printf("      --remote-slot <n>   remote slot id for --remote, default: 0\n");
     printf("\n");
     printf("Query actions:\n");
-    printf("  -A, --get-all           get role, AP MAC, slot 0 MAC, band, power and freq list\n");
+    printf("  -A, --get-all           get role, AP MAC, slot 0 MAC, band, power, power ex and freq list\n");
     printf("  -r, --get-role          get role\n");
     printf("  -m, --get-ap-mac        get AP MAC\n");
     printf("  -s, --get-slot-mac [n]  get slot MAC, default slot: 0\n");
     printf("  -b, --get-band          get band bitmap\n");
     printf("  -w, --get-pwr           get power\n");
+    printf("      --get-pwr-ex        get extended power configuration\n");
     printf("  -f, --get-freq-list     get frequency list\n");
     printf("  -u, --get-uart-baudrate\n");
     printf("                           get MiniDB UART2 baudrate\n");
@@ -815,6 +817,46 @@ static int get_pwr(bb_dev_handle_t *handle, int compact, int remote_slot)
     return 0;
 }
 
+static int get_pwr_ex(bb_dev_handle_t *handle, int compact, int remote_slot)
+{
+    prj_cmd_get_power_ex_t pwr_ex;
+    int ret;
+
+    memset(&pwr_ex, 0, sizeof(pwr_ex));
+    ret = minidb_get_dispatch(handle, PRJ_CMD_GET_PWR_EX, NULL, 0,
+                              &pwr_ex, sizeof(pwr_ex), remote_slot);
+    if (ret == MINIDB_RET_UNSET) {
+        if (compact) {
+            printf("power_ex : disabled/unset\n");
+        } else {
+            print_minidb_title("PRJ_CMD_GET_PWR_EX", remote_slot);
+            printf("power_ex=disabled/unset\n");
+        }
+        return 0;
+    }
+    if (ret) {
+        return ret;
+    }
+
+    if (compact) {
+        printf("power_ex : link_auto=%u auto_reset=%u manu_init=%u manu_reset=%u csma_offset=%u\n",
+               pwr_ex.link_auto,
+               pwr_ex.auto_reset,
+               pwr_ex.manu_init,
+               pwr_ex.manu_reset,
+               pwr_ex.csma_offset);
+    } else {
+        print_minidb_title("PRJ_CMD_GET_PWR_EX", remote_slot);
+        printf("link_auto=%u\n", pwr_ex.link_auto);
+        printf("auto_reset=%u dBm\n", pwr_ex.auto_reset);
+        printf("manu_init=%u dBm\n", pwr_ex.manu_init);
+        printf("manu_reset=%u dBm\n", pwr_ex.manu_reset);
+        printf("csma_offset=%u\n", pwr_ex.csma_offset);
+    }
+
+    return 0;
+}
+
 static int get_freq_list(bb_dev_handle_t *handle, int compact, int remote_slot)
 {
     prj_cmd_get_freq_list_t freq_list;
@@ -870,6 +912,7 @@ static int get_all(bb_dev_handle_t *handle, int remote_slot)
     ret |= get_slot_mac(handle, 0, 1, remote_slot);
     ret |= get_band(handle, 1, remote_slot);
     ret |= get_pwr(handle, 1, remote_slot);
+    ret |= get_pwr_ex(handle, 1, remote_slot);
     ret |= get_freq_list(handle, 1, remote_slot);
 
     return ret ? -1 : 0;
@@ -959,9 +1002,11 @@ static int set_band(bb_dev_handle_t *handle, int band, int remote_slot)
 static int set_pwr(bb_dev_handle_t *handle, const options_t *opts, int remote_slot)
 {
     bb_phy_pwr_basic_t payload;
+    prj_cmd_set_power_ex_t pwr_ex;
     int ret;
 
     memset(&payload, 0, sizeof(payload));
+    memset(&pwr_ex, 0, sizeof(pwr_ex));
     ret = minidb_get_dispatch(handle, PRJ_CMD_GET_PWR, NULL, 0, &payload, sizeof(payload), remote_slot);
     if (ret == MINIDB_RET_UNSET) {
         memset(&payload, 0, sizeof(payload));
@@ -985,6 +1030,16 @@ static int set_pwr(bb_dev_handle_t *handle, const options_t *opts, int remote_sl
         return ret;
     }
 
+    if (!opts->has_pwr_range) {
+        pwr_ex.manu_init = (uint8_t)opts->pwr_init;
+        pwr_ex.manu_reset = (uint8_t)opts->pwr_init;
+        ret = minidb_set_dispatch(handle, PRJ_CMD_SET_PWR_EX, &pwr_ex, sizeof(pwr_ex), remote_slot);
+        if (ret) {
+            printf("PRJ_CMD_SET_PWR succeeded, but PRJ_CMD_SET_PWR_EX failed\n");
+            return ret;
+        }
+    }
+
     print_minidb_title("PRJ_CMD_SET_PWR", remote_slot);
     printf("pwr_auto=%s(%u)\n", pwr_auto_name(payload.pwr_auto), payload.pwr_auto);
     if (payload.pwr_auto) {
@@ -994,6 +1049,17 @@ static int set_pwr(bb_dev_handle_t *handle, const options_t *opts, int remote_sl
         printf("pwr_init=%u dBm\n", payload.pwr_init);
     }
     printf("set minidb power ok\n");
+
+    if (!opts->has_pwr_range) {
+        print_minidb_title("PRJ_CMD_SET_PWR_EX", remote_slot);
+        printf("link_auto=%u\n", pwr_ex.link_auto);
+        printf("auto_reset=%u dBm\n", pwr_ex.auto_reset);
+        printf("manu_init=%u dBm\n", pwr_ex.manu_init);
+        printf("manu_reset=%u dBm\n", pwr_ex.manu_reset);
+        printf("csma_offset=%u\n", pwr_ex.csma_offset);
+        printf("set minidb extended power configuration ok\n");
+    }
+
     return 0;
 }
 
@@ -1158,6 +1224,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
         OPT_GET_SLOT_MAC,
         OPT_GET_BAND,
         OPT_GET_PWR,
+        OPT_GET_PWR_EX,
         OPT_GET_FREQ_LIST,
         OPT_GET_UART_BAUDRATE,
         OPT_SET_ROLE,
@@ -1184,6 +1251,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
         {"get-slot-mac", optional_argument, NULL, OPT_GET_SLOT_MAC},
         {"get-band", no_argument, NULL, OPT_GET_BAND},
         {"get-pwr", no_argument, NULL, OPT_GET_PWR},
+        {"get-pwr-ex", no_argument, NULL, OPT_GET_PWR_EX},
         {"get-freq-list", no_argument, NULL, OPT_GET_FREQ_LIST},
         {"get-uart-baudrate", no_argument, NULL, OPT_GET_UART_BAUDRATE},
         {"set-role", required_argument, NULL, OPT_SET_ROLE},
@@ -1279,6 +1347,11 @@ static int parse_options(int argc, char **argv, options_t *opts)
         case 'w':
         case OPT_GET_PWR:
             if (set_action(opts, ACTION_GET_PWR)) {
+                return -1;
+            }
+            break;
+        case OPT_GET_PWR_EX:
+            if (set_action(opts, ACTION_GET_PWR_EX)) {
                 return -1;
             }
             break;
@@ -1379,6 +1452,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
         if (opts->action == ACTION_GET_ALL || opts->action == ACTION_GET_ROLE ||
             opts->action == ACTION_GET_AP_MAC || opts->action == ACTION_GET_SLOT_MAC ||
             opts->action == ACTION_GET_BAND || opts->action == ACTION_GET_PWR ||
+            opts->action == ACTION_GET_PWR_EX ||
             opts->action == ACTION_GET_FREQ_LIST ||
             opts->action == ACTION_GET_UART_BAUDRATE) {
             printf("reboot can only be used with set/reset actions\n");
@@ -1411,6 +1485,8 @@ static int run_action(bb_dev_handle_t *handle, const options_t *opts)
         return get_band(handle, 0, remote_slot);
     case ACTION_GET_PWR:
         return get_pwr(handle, 0, remote_slot);
+    case ACTION_GET_PWR_EX:
+        return get_pwr_ex(handle, 0, remote_slot);
     case ACTION_GET_FREQ_LIST:
         return get_freq_list(handle, 0, remote_slot);
     case ACTION_GET_UART_BAUDRATE:

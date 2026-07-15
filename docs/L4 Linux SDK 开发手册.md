@@ -1346,7 +1346,7 @@ mode=0
 
 ### 6、MiniDB 配置示例
 
-`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段和功率等配置项。增加 `--remote` 后，查询、写入、重置和重启会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行，默认 remote slot 为 0。
+`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段、功率和扩展功率等配置项。增加 `--remote` 后，查询、写入、重置和重启会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行，默认 remote slot 为 0。
 
 MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 MiniDB 后，配置需要重启设备后才生效；建议设置或重置后使用 `-H` 重启设备，重启完成后再查询确认。
 
@@ -1354,12 +1354,13 @@ MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 
 
 | 参数 | 长参数 | 说明 | 默认值 |
 | --- | --- | --- | --- |
-| `-A` | `--get-all` | 查询 role、AP MAC、slot 0 MAC、band 和 power | 不执行 |
+| `-A` | `--get-all` | 查询 role、AP MAC、slot 0 MAC、band、power、power ex 和 freq list | 不执行 |
 | `-r` | `--get-role` | 查询 MiniDB 中保存的 role | 不执行 |
 | `-m` | `--get-ap-mac` | 查询 MiniDB 中保存的 AP MAC | 不执行 |
 | `-s [slot]` | `--get-slot-mac[=slot]` | 查询 MiniDB 中保存的 slot MAC | slot 0 |
 | `-b` | `--get-band` | 查询 MiniDB 中保存的 band bitmap | 不执行 |
 | `-w` | `--get-pwr` | 查询 MiniDB 中保存的 power 配置 | 不执行 |
+| 无 | `--get-pwr-ex` | 查询 MiniDB 中保存的扩展功率配置 | 不执行 |
 | `-u` | `--get-uart-baudrate` | 查询 MiniDB 中保存的 UART2 波特率 | 不执行 |
 | `-R <ap|dev|0|1>` | `--set-role <...>` | 设置 MiniDB role | 不执行 |
 | `-M <mac>` | `--set-ap-mac <mac>` | 设置 MiniDB AP MAC | 不执行 |
@@ -1396,8 +1397,10 @@ band bitmap 支持名称和数值：
 
 | 输入 | 行为 |
 | --- | --- |
-| `-W 20` | 设置固定功率，写入 `pwr_auto=0`、`pwr_init=20` |
+| `-W 20` | 设置固定功率，并同步写入扩展功率的手动初始化和重置功率 |
 | `-W 10,27` | 设置自适应功率区间，写入 `pwr_auto=1`、`pwr_min=10`、`pwr_max=27` |
+
+固定功率模式下，`-W 20` 会先通过 `PRJ_CMD_SET_PWR` 写入 `pwr_init=20`，再通过 `PRJ_CMD_SET_PWR_EX` 写入 `link_auto=0`、`auto_reset=0`、`manu_init=20`、`manu_reset=20`、`csma_offset=0`。自适应区间格式 `-W min,max` 只更新基础功率配置，不修改扩展功率配置。扩展功率可通过 `--get-pwr-ex` 查询；设备禁用或从未配置时显示 `disabled/unset`。
 
 UART 波特率配置固定操作 UART2。`-U <baudrate>` 只修改 MiniDB 中 UART2 的波特率，保留已有数据位、校验位、停止位和 RX buffer 配置；如果 UART2 尚未配置，则使用 `8N1` 和默认 RX buffer 创建配置。
 
@@ -1688,6 +1691,13 @@ band=5g(0x04)
 pwr_auto=off(0)
 pwr_init=20 dBm
 set minidb power ok
+[PRJ_CMD_SET_PWR_EX]
+link_auto=0
+auto_reset=0 dBm
+manu_init=20 dBm
+manu_reset=20 dBm
+csma_offset=0
+set minidb extended power configuration ok
 ```
 
 查询确认 MiniDB 中保存的功率配置：
@@ -1702,6 +1712,23 @@ set minidb power ok
 [PRJ_CMD_GET_PWR]
 pwr_auto=off(0)
 pwr_init=20 dBm
+```
+
+查询确认同步写入的扩展功率配置：
+
+```sh
+./l4_minidb_config --get-pwr-ex
+```
+
+正常调用示例：
+
+```text
+[PRJ_CMD_GET_PWR_EX]
+link_auto=0
+auto_reset=0 dBm
+manu_init=20 dBm
+manu_reset=20 dBm
+csma_offset=0
 ```
 
 ##### 6.3.10 设置功率自适应区间后查询
@@ -1752,7 +1779,7 @@ pwr_max=27 dBm
 reset minidb ok
 ```
 
-查询确认 role、AP MAC、slot 0 MAC、band 和 power：
+查询确认 role、AP MAC、slot 0 MAC、band、power、扩展功率和频点列表：
 
 ```sh
 ./l4_minidb_config -A
@@ -1767,11 +1794,13 @@ ap_mac   : unset
 slot_mac0: unset
 band     : unset
 power    : unset
+power_ex : disabled/unset
+freq_list: unset
 ```
 
 ##### 6.3.12 设置后查询全部 MiniDB 信息
 
-完成所需设置后，可查询 role、AP MAC、slot 0 MAC、band 和 power：
+完成所需设置后，可查询 role、AP MAC、slot 0 MAC、band、power、扩展功率和频点列表：
 
 ```sh
 ./l4_minidb_config -A
@@ -1786,6 +1815,8 @@ ap_mac   : 11:22:33:44
 slot_mac0: 11:22:33:44
 band     : auto(0x07)
 power    : fixed init=20 dBm
+power_ex : disabled/unset
+freq_list: unset
 ```
 
 ##### 6.3.13 设置后自动重启设备并查询
