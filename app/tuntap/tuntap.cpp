@@ -121,6 +121,238 @@ static STRU_BBComRxFIFO network_BB_ComRxFIFO = {0};
 
 static STRU_BBComRxFIFO network_BB_ComRxFIFO_List[4] = {0};
 
+#define BB_RECONNECT_INTERVAL_SEC  2
+
+typedef enum
+{
+    BB_RECONNECT_OK = 0,
+    BB_RECONNECT_DEVICE_LIST_UNAVAILABLE,
+    BB_RECONNECT_TARGET_NOT_FOUND,
+    BB_RECONNECT_DEVICE_OPEN_FAILED,
+    BB_RECONNECT_SOCKET_OPEN_FAILED,
+} ENUM_BBReconnectResult;
+
+static const char* bb_reconnect_result_string(ENUM_BBReconnectResult result)
+{
+    switch (result) {
+    case BB_RECONNECT_DEVICE_LIST_UNAVAILABLE:
+        return "device list unavailable";
+    case BB_RECONNECT_TARGET_NOT_FOUND:
+        return "target device not found";
+    case BB_RECONNECT_DEVICE_OPEN_FAILED:
+        return "device open failed";
+    case BB_RECONNECT_SOCKET_OPEN_FAILED:
+        return "socket open failed";
+    case BB_RECONNECT_OK:
+    default:
+        return "success";
+    }
+}
+
+static int bb_dev_info_valid(const bb_dev_info_t& info)
+{
+    return info.maclen > 0 && info.maclen <= (int)sizeof(info.mac);
+}
+
+static int bb_dev_info_equal(const bb_dev_info_t& lhs, const bb_dev_info_t& rhs)
+{
+    return bb_dev_info_valid(lhs) &&
+           bb_dev_info_valid(rhs) &&
+           lhs.maclen == rhs.maclen &&
+           memcmp(lhs.mac, rhs.mac, lhs.maclen) == 0;
+}
+
+static void print_target_device(const bb_dev_info_t& info)
+{
+    printf("target device mac=");
+    for (int i = 0; i < info.maclen; ++i) {
+        printf("%s%02x", i ? ":" : "", info.mac[i]);
+    }
+    printf("\n");
+}
+
+static int open_bb_socket(bb_tun_cfg& cfg, bb_dev_handle_t* pdev)
+{
+    bb_sock_opt_t opt = {0};
+    opt.rx_buf_size = cfg.rx_buf_len;
+    opt.tx_buf_size = cfg.tx_buf_len;
+
+    int fd = bb_socket_open(pdev,
+                            cfg.slot_id,
+                            cfg.port_id,
+                            BB_SOCK_FLAG_RX | BB_SOCK_FLAG_TX,
+                            &opt);
+    if (fd >= 0) {
+        return fd;
+    }
+
+    printf("create bb socket failed\n");
+    if (!cfg.force_close_on_open_fail) {
+        return -1;
+    }
+
+    bb_force_close_socket_t force_close = {0};
+    force_close.slot = (uint8_t)cfg.slot_id;
+    force_close.port = (uint8_t)cfg.port_id;
+    int ret = bb_ioctl(pdev, BB_FORCE_CLS_SOCKET, &force_close, NULL);
+    printf("BB_FORCE_CLS_SOCKET slot %u port %u ret %d\n",
+           (unsigned int)force_close.slot,
+           (unsigned int)force_close.port,
+           ret);
+    if (ret) {
+        return -1;
+    }
+
+    usleep(200 * 1000);
+    fd = bb_socket_open(pdev,
+                        cfg.slot_id,
+                        cfg.port_id,
+                        BB_SOCK_FLAG_RX | BB_SOCK_FLAG_TX,
+                        &opt);
+    if (fd < 0) {
+        printf("retry create bb socket failed\n");
+        return -1;
+    }
+
+    return fd;
+}
+
+static int open_initial_bb_connection(bb_tun_cfg& cfg)
+{
+    bb_dev_t** devs = NULL;
+    int count = bb_dev_getlist(cfg.phost, &devs);
+    if (count <= 0) {
+        printf("dev cnt = 0\n");
+        return -1;
+    }
+
+    if (cfg.dev_index < 0 || cfg.dev_index >= count) {
+        printf("invalid device index %d, valid range: 0-%d\n", cfg.dev_index, count - 1);
+        bb_dev_freelist(devs);
+        return -1;
+    }
+
+    bb_dev_info_t info = {0};
+    int ret = bb_dev_getinfo(devs[cfg.dev_index], &info);
+    if (ret || !bb_dev_info_valid(info)) {
+        printf("can't identify device[%d], ret=%d\n", cfg.dev_index, ret);
+        bb_dev_freelist(devs);
+        return -1;
+    }
+
+    bb_dev_handle_t* pdev = bb_dev_open(devs[cfg.dev_index]);
+    bb_dev_freelist(devs);
+    if (!pdev) {
+        printf("can't open dev!!!\n");
+        return -1;
+    }
+
+    int fd = open_bb_socket(cfg, pdev);
+    if (fd < 0) {
+        bb_dev_close(pdev);
+        return -1;
+    }
+
+    cfg.target_dev_info = info;
+    cfg.target_dev_info_valid = true;
+    cfg.pdev = pdev;
+    cfg.bb_fd.store(fd, std::memory_order_release);
+    print_target_device(info);
+    printf("bb socket connected, fd=%d\n", fd);
+    return 0;
+}
+
+static int open_reconnected_bb_connection(bb_tun_cfg& cfg, ENUM_BBReconnectResult& result)
+{
+    result = BB_RECONNECT_TARGET_NOT_FOUND;
+    if (!cfg.target_dev_info_valid) {
+        return -1;
+    }
+
+    bb_dev_t** devs = NULL;
+    int count = bb_dev_getlist(cfg.phost, &devs);
+    if (count <= 0) {
+        result = BB_RECONNECT_DEVICE_LIST_UNAVAILABLE;
+        return -1;
+    }
+
+    bb_dev_handle_t* pdev = NULL;
+    int target_found = 0;
+    for (int i = 0; i < count; ++i) {
+        bb_dev_info_t info = {0};
+        if (bb_dev_getinfo(devs[i], &info) == 0 &&
+            bb_dev_info_equal(info, cfg.target_dev_info)) {
+            target_found = 1;
+            pdev = bb_dev_open(devs[i]);
+            break;
+        }
+    }
+    bb_dev_freelist(devs);
+
+    if (!pdev) {
+        result = target_found ? BB_RECONNECT_DEVICE_OPEN_FAILED : BB_RECONNECT_TARGET_NOT_FOUND;
+        return -1;
+    }
+
+    int fd = open_bb_socket(cfg, pdev);
+    if (fd < 0) {
+        result = BB_RECONNECT_SOCKET_OPEN_FAILED;
+        bb_dev_close(pdev);
+        return -1;
+    }
+
+    cfg.pdev = pdev;
+    cfg.bb_fd.store(fd, std::memory_order_release);
+    result = BB_RECONNECT_OK;
+    return fd;
+}
+
+static void close_bb_connection(bb_tun_cfg& cfg, int failed_fd)
+{
+    std::lock_guard<std::mutex> lock(cfg.bb_socket_mutex);
+    int current_fd = cfg.bb_fd.exchange(-1, std::memory_order_acq_rel);
+    if (current_fd >= 0) {
+        bb_socket_close(current_fd);
+    } else if (failed_fd >= 0) {
+        // The writer may already have marked the fd invalid. Closing twice is
+        // harmless and ensures a blocked reader is woken when the session exists.
+        bb_socket_close(failed_fd);
+    }
+
+    if (cfg.pdev) {
+        bb_dev_close(cfg.pdev);
+        cfg.pdev = NULL;
+    }
+
+    memset(&network_BB_ComRxFIFO, 0, sizeof(network_BB_ComRxFIFO));
+}
+
+static void reconnect_bb_connection(bb_tun_cfg& cfg, int failed_fd)
+{
+    printf("bb socket disconnected, fd=%d; starting reconnect\n", failed_fd);
+    fflush(stdout);
+    close_bb_connection(cfg, failed_fd);
+
+    unsigned int attempts = 0;
+    while (1) {
+        ++attempts;
+        ENUM_BBReconnectResult result = BB_RECONNECT_OK;
+        int fd = open_reconnected_bb_connection(cfg, result);
+        if (fd >= 0) {
+            printf("bb socket reconnected, fd=%d, attempt=%u\n", fd, attempts);
+            fflush(stdout);
+            return;
+        }
+
+        printf("bb reconnect attempt %u failed: %s; retry in %d seconds\n",
+               attempts,
+               bb_reconnect_result_string(result),
+               BB_RECONNECT_INTERVAL_SEC);
+        fflush(stdout);
+        sleep(BB_RECONNECT_INTERVAL_SEC);
+    }
+}
+
 static uint8_t header[] = {0xFF, 0xA5, 0xAA, 0x5A, 0xFF};
 #define HEADER_SYNC_SIZE                sizeof(header)
 
@@ -190,9 +422,28 @@ static void tun_2_bb_thread(bb_tun_cfg& cfg)
         pkg_buf[13] = (u16_checkSum & 0x0FF);
         pkg_buf[14] = (u16_checkSum >> 8) & 0x0FF;
         
-        int wrlen = bb_socket_write(cfg.bb_fd, pkg_buf, rdlen + PACKET_HEADER_SIZE, -1);
-        if (cfg.debugflg) {
-            com_log(COM_SOCKET_DATA, "bb write = %d", wrlen);
+        {
+            std::lock_guard<std::mutex> lock(cfg.bb_socket_mutex);
+            int fd = cfg.bb_fd.load(std::memory_order_acquire);
+            if (fd < 0) {
+                // Keep consuming TAP packets while the receive thread reconnects.
+                continue;
+            }
+
+            int wrlen = bb_socket_write(fd, pkg_buf, rdlen + PACKET_HEADER_SIZE, -1);
+            if (cfg.debugflg) {
+                com_log(COM_SOCKET_DATA, "bb write = %d", wrlen);
+            }
+
+            if (wrlen <= 0) {
+                int expected_fd = fd;
+                if (cfg.bb_fd.compare_exchange_strong(expected_fd,
+                                                      -1,
+                                                      std::memory_order_acq_rel)) {
+                    // Wake bb_socket_read(); that thread owns device discovery and reconnect.
+                    bb_socket_close(fd);
+                }
+            }
         }
     }
 }
@@ -368,13 +619,16 @@ static void bb_2_tun_thread(bb_tun_cfg& cfg)
         return;
     }
 
-    int offset = 0;
     while (1) {
-        int len = bb_socket_read(cfg.bb_fd, pkg_buf, cfg.buff_max, -1);
+        int fd = cfg.bb_fd.load(std::memory_order_acquire);
+        if (fd < 0) {
+            reconnect_bb_connection(cfg, fd);
+            continue;
+        }
+
+        int len = bb_socket_read(fd, pkg_buf, cfg.buff_max, -1);
         if (len <= 0) {
-            // 基带断开链接
-            printf("---------------------> bb_socket_read < 0 \n");
-            sleep(2);
+            reconnect_bb_connection(cfg, fd);
             continue;
         }
 
@@ -410,25 +664,10 @@ static int tun_test(bb_tun_cfg& cfg)
         printf("connect failed = %d\n", ret);
         return ret;
     }
-    bb_sock_opt_t opt = {0};
 
-    bb_dev_t** devs;
-
-    int sz = bb_dev_getlist(cfg.phost, &devs);
-    if (sz <= 0) {
-        printf("dev cnt = 0\n");
-        return sz;
-    }
-
-    if (cfg.dev_index < 0 || cfg.dev_index >= sz) {
-        printf("invalid device index %d, valid range: 0-%d\n", cfg.dev_index, sz - 1);
-        return -1;
-    }
-
-    cfg.pdev = bb_dev_open(devs[cfg.dev_index]);
-    if (!cfg.pdev) {
-        printf("can't open dev!!!\n");
-        return -1;
+    ret = open_initial_bb_connection(cfg);
+    if (ret) {
+        return ret;
     }
 
 #if 0
@@ -453,48 +692,6 @@ static int tun_test(bb_tun_cfg& cfg)
     }
     cfg.dev->up();
 #endif
-
-    // open bb port
-    opt.rx_buf_size = cfg.rx_buf_len;
-    opt.tx_buf_size = cfg.tx_buf_len;
-
-    cfg.bb_fd = bb_socket_open(cfg.pdev,
-                               cfg.slot_id,
-                               cfg.port_id,
-                               BB_SOCK_FLAG_RX | BB_SOCK_FLAG_TX,
-                               &opt);
-    if (cfg.bb_fd < 0) {
-        printf("create bb socket failed!\n");
-        if (!cfg.force_close_on_open_fail) {
-            return 0;
-        }
-
-        bb_force_close_socket_t force_close = {0};
-        force_close.slot = (uint8_t)cfg.slot_id;
-        force_close.port = (uint8_t)cfg.port_id;
-        ret = bb_ioctl(cfg.pdev, BB_FORCE_CLS_SOCKET, &force_close, NULL);
-        printf("BB_FORCE_CLS_SOCKET slot %u port %u ret %d\n",
-               (unsigned int)force_close.slot,
-               (unsigned int)force_close.port,
-               ret);
-        if (ret) {
-            return ret;
-        }
-
-        usleep(200 * 1000);
-        cfg.bb_fd = bb_socket_open(cfg.pdev,
-                                   cfg.slot_id,
-                                   cfg.port_id,
-                                   BB_SOCK_FLAG_RX | BB_SOCK_FLAG_TX,
-                                   &opt);
-        if (cfg.bb_fd < 0) {
-            printf("retry create bb socket failed!\n");
-            return -1;
-        }
-        printf("retry create bb socket success, ar_bb_socket_fd = %d\n", cfg.bb_fd);
-    } else {
-        printf("lgeng - 0  ar_bb_socket_fd = %d\n", cfg.bb_fd);
-    }
 
     std::thread tun_bb(tun_2_bb_thread, std::ref(cfg));
     std::thread bb_tun(bb_2_tun_thread, std::ref(cfg));

@@ -4,13 +4,18 @@
 #include "bb_api.h"
 #include "tuntap++.hh"
 #include "string.h"
+#include <atomic>
 #include <memory>
+#include <mutex>
 struct bb_tun_cfg {
     // bb field
-    int bb_fd = -1;
+    std::atomic<int> bb_fd {-1};
+    std::mutex       bb_socket_mutex;
 
     bb_host_t*       phost   = nullptr;
     bb_dev_handle_t* pdev    = nullptr;
+    bb_dev_info_t    target_dev_info = {};
+    bool             target_dev_info_valid = false;
     bb_slot_e        slot_id = BB_SLOT_0;
     int              port_id = 3;
     int              dev_index = 0;
