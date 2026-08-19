@@ -48,6 +48,7 @@ L4_Linux_SDK/
   com/              公共头文件、RPC、日志、缓冲区等基础代码
   daemon/           后台服务和 8030 设备后端
   examples/         API 示例程序
+  use_cases/        用例脚本
   docs/             开发手册
   script/           编译和清理脚本
   third_package/    第三方依赖源码包或补丁

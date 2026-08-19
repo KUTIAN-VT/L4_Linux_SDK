@@ -11,7 +11,7 @@
 
 static void usage(const char *prog)
 {
-    printf("Usage: %s [options] <-g file|-s file|-r>\n", prog);
+    printf("Usage: %s [options] <-g file|-s file|-r|-H>\n", prog);
     printf("\n");
     printf("Options:\n");
     printf("  -h              show this help\n");
@@ -21,6 +21,7 @@ static void usage(const char *prog)
     printf("  -g <file>       dump config file with BB_GET_CFG\n");
     printf("  -s <file>       write config file with BB_SET_CFG\n");
     printf("  -r              reset config file with BB_RESET_CFG\n");
+    printf("  -H              reboot device, or reboot after successful set/reset\n");
     printf("  -R              operate peer device by remote ioctl, default remote slot: 0\n");
     printf("  -S <slot>       remote slot id for -R, default: 0\n");
     printf("  -m <mode>       BB_GET_CFG mode: auto/memory/flash or 0/1/2, default: auto\n");
@@ -441,6 +442,31 @@ static int reset_config_file(bb_dev_handle_t *handle, int remote_slot)
     return 0;
 }
 
+static int reboot_device(bb_dev_handle_t *handle, int remote_slot)
+{
+    bb_set_reboot_t reboot;
+    int ret;
+
+    memset(&reboot, 0, sizeof(reboot));
+    reboot.tim_ms = 0;
+
+    print_config_title("BB_SET_SYS_REBOOT", remote_slot);
+    ret = config_file_ioctl(handle,
+                            BB_SET_SYS_REBOOT,
+                            &reboot,
+                            (uint16_t)sizeof(reboot),
+                            NULL,
+                            0,
+                            remote_slot);
+    if (ret) {
+        printf("BB_SET_SYS_REBOOT failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    printf("reboot requested\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *addr = "127.0.0.1";
@@ -450,6 +476,7 @@ int main(int argc, char **argv)
     int dev_index = 0;
     int cfg_mode = 0;
     int do_reset = 0;
+    int do_reboot = 0;
     int remote = 0;
     int remote_slot = 0;
     int remote_slot_set = 0;
@@ -458,7 +485,7 @@ int main(int argc, char **argv)
     int ret;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:g:s:rRS:m:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:g:s:rHRS:m:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -488,6 +515,9 @@ int main(int argc, char **argv)
             do_reset = 1;
             ++action_count;
             break;
+        case 'H':
+            do_reboot = 1;
+            break;
         case 'R':
             remote = 1;
             break;
@@ -508,8 +538,14 @@ int main(int argc, char **argv)
         }
     }
 
-    if (action_count != 1) {
-        printf("specify exactly one action: -g file, -s file, or -r\n");
+    if (action_count > 1 || (action_count == 0 && !do_reboot)) {
+        printf("specify exactly one action: -g file, -s file, -r, or -H\n");
+        usage(argv[0]);
+        return -1;
+    }
+
+    if (get_path && do_reboot) {
+        printf("-H can only be used alone or with -s/-r\n");
         usage(argv[0]);
         return -1;
     }
@@ -537,6 +573,12 @@ int main(int argc, char **argv)
         ret = set_config_file(ctx.handle, set_path, remote ? remote_slot : -1);
     } else if (do_reset) {
         ret = reset_config_file(ctx.handle, remote ? remote_slot : -1);
+    } else {
+        ret = reboot_device(ctx.handle, remote ? remote_slot : -1);
+    }
+
+    if (!ret && do_reboot && action_count != 0) {
+        ret = reboot_device(ctx.handle, remote ? remote_slot : -1);
     }
 
     bb_demo_close(&ctx);

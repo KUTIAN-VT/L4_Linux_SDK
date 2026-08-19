@@ -6,6 +6,8 @@
 
 ### Added
 
+- 新增 `use_cases/l4_upgrade.sh`，可自动启动 `l4_daemon`，并串联固件升级、恢复出厂设置和设备重启流程。
+- 为 `l4_config_file` 增加 `-H` 设备重启功能，并支持在写入或恢复配置成功后重启。
 - 重新引入 `l4_cmd_dbg` 命令行调试工具，支持按设备序号或 MAC 选择设备、列出设备及纯输出模式。
 - 同步原厂 `1.3.02-28-release-20260708` 的 Socket 加密、MCS 模式查询和频宽模式查询接口。
 - 为 `l4_socket_transfer` 增加 default、AES128、AES256 加密参数示例。
