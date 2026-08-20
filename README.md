@@ -83,6 +83,7 @@ install/arm64/
 | 示例程序 | `l4_minidb_config` | MiniDB 持久化配置读写 |
 | 示例程序 | `l4_uart_config` | UART 配置读写 |
 | 示例程序 | `l4_socket_transfer` | 普通或加密 Socket 数据收发 |
+| 示例程序 | `l4_power_forced_tx` | 指定频点和功率进入功率强发测试模式 |
 
 `examples/00_common` 是示例公共库，封装连接 daemon、枚举设备和打开设备的公共流程，不是可单独运行的示例程序。
 

@@ -490,7 +490,7 @@ rtt min/avg/max/mdev = 27.678/30.619/34.187/2.471 ms
 
 ## 三、API 示例
 
-SDK 在 `examples/` 下提供 8 个业务 API 示例，另有 `examples/00_common` 公共连接库。业务示例都复用 `examples/00_common` 中的公共连接流程：
+SDK 在 `examples/` 下提供 9 个通用业务 API 示例，另有 `examples/00_common` 公共连接库和项目自定义事件例程。业务示例都复用 `examples/00_common` 中的公共连接流程：
 
 ```text
 bb_host_connect()
@@ -2048,6 +2048,38 @@ uart2_baudrate=115200
 ./l4_socket_transfer -s 0 -P 1 --hex-input
 ```
 
+### 9、功率强发示例
+
+`l4_power_forced_tx` 用于让本机 8030 设备在指定频点和功率下进入功率强发测试模式。程序固定使用物理用户 `BB_USER_BR_CS` 和 TX 方向，频点与功率必须显式传入。
+
+> 警告：该例程会进入 debug mode 并停止正常业务。程序退出后设备仍保持 debug/功率测试模式，不会自动恢复，请仅在射频测试环境中使用。
+
+#### 9.1 参数说明
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `-f <freq_khz>` | 发射频点，单位 KHz | 必填 |
+| `-P <power_dbm>` | 发射功率，范围 `0-31 dBm` | 必填 |
+| `-a <addr>` | daemon 地址 | `127.0.0.1` |
+| `-p <port>` | daemon 端口 | `50000` |
+| `-i <index>` | 本机设备索引 | `0` |
+
+#### 9.2 标准使用方法
+
+以 `5100000 KHz`、`27 dBm` 启动功率强发：
+
+```sh
+./l4_power_forced_tx -f 5100000 -P 27
+```
+
+将发射频点改为 `2.41 GHz`：
+
+```sh
+./l4_power_forced_tx -f 2410000 -P 27
+```
+
+程序依次调用 `BB_SET_DBG_MODE`、`BB_SET_POWER_AUTO`、`BB_SET_FREQ`、`BB_SET_POWER` 和 `BB_SET_POWER_TEST_MODE`，相邻命令之间等待约 200 ms。任一步骤失败时不再执行后续命令。
+
 ## 四、高级构建
 
 通常优先使用 `script/` 下的脚本。只有需要手动控制 CMake 参数、只构建部分 target、或排查交叉编译配置时，才建议直接执行 CMake 命令。
@@ -2092,6 +2124,7 @@ cmake --build L4_Linux_SDK/build/x86_64 --target \
   l4_minidb_config \
   l4_uart_config \
   l4_socket_transfer \
+  l4_power_forced_tx \
   l4_daemon \
   -j
 
@@ -2124,6 +2157,7 @@ cmake --build L4_Linux_SDK/build/arm64 --target \
   l4_minidb_config \
   l4_uart_config \
   l4_socket_transfer \
+  l4_power_forced_tx \
   l4_daemon \
   -j
 
