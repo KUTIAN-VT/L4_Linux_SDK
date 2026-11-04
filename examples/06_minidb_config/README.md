@@ -1,6 +1,6 @@
 # 06_l4_minidb_config MiniDB 配置示例
 
-`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置。增加 `--remote` 后，查询、写入、重置和重启会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行，默认 remote slot 为 0。
+`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置。增加 `-R [slot]` 或 `--remote[=<slot>]` 后，查询、写入、重置和重启会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行，默认 remote slot 为 0。
 
 MiniDB 是持久化配置，不等同于当前运行态配置。写入后是否立即生效由设备侧决定，通常建议重启设备后再次查询确认。
 
@@ -45,8 +45,8 @@ MiniDB 是持久化配置，不等同于当前运行态配置。写入后是否�
 设置角色：
 
 ```sh
-./l4_minidb_config -R ap
-./l4_minidb_config -R dev
+./l4_minidb_config --set-role ap
+./l4_minidb_config --set-role dev
 ```
 
 设置 AP MAC：
@@ -114,37 +114,37 @@ MiniDB 是持久化配置，不等同于当前运行态配置。写入后是否�
 远程查询对端全部 MiniDB 信息：
 
 ```sh
-./l4_minidb_config --remote -A
+./l4_minidb_config -R 0 -A
 ```
 
 远程写入对端 MiniDB role：
 
 ```sh
-./l4_minidb_config --remote -R ap
+./l4_minidb_config -R 0 --set-role ap
 ```
 
 远程写入对端 slot MAC：
 
 ```sh
-./l4_minidb_config --remote -S 1,11:22:33:44
+./l4_minidb_config -R 0 -S 0,11:22:33:44
 ```
 
 远程重置对端 MiniDB：
 
 ```sh
-./l4_minidb_config --remote -D
+./l4_minidb_config -R 0 -D
 ```
 
 远程重启对端设备：
 
 ```sh
-./l4_minidb_config --remote -H
+./l4_minidb_config -R 0 -H
 ```
 
-远程操作指定 remote slot：
+通过 remote slot 0 修改对端 band 并重启：
 
 ```sh
-./l4_minidb_config --remote --remote-slot 1 -B auto -H
+./l4_minidb_config -R 0 -B auto -H
 ```
 
 ## 参数说明
@@ -156,8 +156,7 @@ MiniDB 是持久化配置，不等同于当前运行态配置。写入后是否�
 | `-a <addr>` | daemon 地址 | `127.0.0.1` |
 | `-p <port>` | daemon 端口 | `BB_PORT_DEFAULT` |
 | `-i <index>` | 设备序号 | `0` |
-| `--remote` | 通过远程 ioctl 操作对端设备 | 本机操作 |
-| `--remote-slot <slot>` | 指定 `--remote` 使用的 remote slot | `0` |
+| `-R [slot]` / `--remote[=<slot>]` | 通过远程 ioctl 操作对端，参数为 remote slot | 本机操作；slot 默认 `0` |
 | `-h` | 打印帮助 | 无 |
 
 查询参数：
@@ -178,7 +177,7 @@ MiniDB 是持久化配置，不等同于当前运行态配置。写入后是否�
 
 | 短参数 | 长参数 | 作用 |
 | --- | --- | --- |
-| `-R <ap|dev|0|1>` | `--set-role <...>` | 设置 role |
+| 无 | `--set-role <ap|dev|0|1>` | 设置 role |
 | `-M <mac>` | `--set-ap-mac <mac>` | 设置 AP MAC |
 | `-S <mac|slot,mac>` | `--set-slot-mac <mac|slot,mac>` | 设置 slot MAC，默认 slot 0 |
 | `-B <auto|2g|5g|0x07>` | `--set-band <...>` | 设置 band bitmap |
@@ -231,4 +230,4 @@ band bitmap 约定：
 | `2g` | `0x02` |
 | `5g` | `0x04` |
 
-每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`-W` 的固定功率和功率范围格式互斥。`-s` 和 `-S <mac>` 默认使用 MiniDB slot 0；非 0 MiniDB slot 可用 `-s 1`、`--get-slot-mac=1` 或 `-S 1,11:22:33:44`。`--remote` 只改变命令实际执行端，`--remote-slot` 只能和 `--remote` 一起使用；不新增远程短参数，因为 `-R` 已是 `--set-role`，`-S` 已是 `--set-slot-mac`。`-H/--reboot` 可以单独作为重启动作，也可以附加在设置或重置动作后，例如 `-F 2400,2411 -H`；带 `--remote` 时 reboot 也在对端执行。
+每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`-W` 的固定功率和功率范围格式互斥。`-s` 和 `-S <mac>` 默认使用 MiniDB 命令内部的 slot 0；其它 MiniDB slot 可用 `-s 1`、`--get-slot-mac=1` 或 `-S 1,11:22:33:44`。`-R`/`--remote` 只选择命令实际执行端和外层 remote slot，不改变这些命令内部的 slot。`-H/--reboot` 可以单独作为重启动作，也可以附加在设置或重置动作后，例如 `-F 2400,2411 -H`；带 `-R` 时 reboot 也在对端执行。

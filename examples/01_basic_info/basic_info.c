@@ -47,6 +47,44 @@ static const char *link_state_name(uint8_t state)
     }
 }
 
+static const char *boot_reason_name(uint32_t reason)
+{
+    switch (reason) {
+    case BB_BOOT_REASON_POWER_OFF:
+        return "POWER_OFF";
+    case BB_BOOT_REASON_REBOOT:
+        return "REBOOT";
+    case BB_BOOT_REASON_MALLOC_FAIL:
+        return "MALLOC_FAIL";
+    case BB_BOOT_REASON_STACK_OVERFLOW:
+        return "STACK_OVERFLOW";
+    case BB_BOOT_REASON_LOAD_INSTRUCTION:
+        return "LOAD_INSTRUCTION";
+    case BB_BOOT_REASON_ILLEGAL_INSTRUCTION:
+        return "ILLEGAL_INSTRUCTION";
+    case BB_BOOT_REASON_DEBUG_BREAK:
+        return "DEBUG_BREAK";
+    case BB_BOOT_REASON_LOAD_INSTRUCTION_UNALIGNED:
+        return "LOAD_INSTRUCTION_UNALIGNED";
+    case BB_BOOT_REASON_LOAD_INSTRUCTION_ACCESS_ERROR:
+        return "LOAD_INSTRUCTION_ACCESS_ERROR";
+    case BB_BOOT_REASON_STORE_INSTRUCTION_UNALIGNED:
+        return "STORE_INSTRUCTION_UNALIGNED";
+    case BB_BOOT_REASON_STORE_INSTRUCTION_ACCESS_ERROR:
+        return "STORE_INSTRUCTION_ACCESS_ERROR";
+    case BB_BOOT_REASON_USER_MODE_ENVIRONMENT:
+        return "USER_MODE_ENVIRONMENT";
+    case BB_BOOT_REASON_MACHINE_MODE_ENVIRONMENT:
+        return "MACHINE_MODE_ENVIRONMENT";
+    case BB_BOOT_REASON_UNKNOWN:
+        return "UNKNOWN";
+    case BB_BOOT_REASON_ENTER_RECOVERY_MODE:
+        return "ENTER_RECOVERY_MODE";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 static const char *bandwidth_name(uint8_t bandwidth)
 {
     switch (bandwidth) {
@@ -99,7 +137,10 @@ typedef struct {
     const bb_phy_status_t *phy;
 } user_phy_view_t;
 
-static int get_user_phy_view(const bb_get_status_out_t *status, int tx, user_phy_view_t *view)
+static int get_user_phy_view(const bb_get_status_out_t *status,
+                             int tx,
+                             int dev_tx_user,
+                             user_phy_view_t *view)
 {
     switch (status->role) {
     case BB_ROLE_AP:
@@ -107,7 +148,7 @@ static int get_user_phy_view(const bb_get_status_out_t *status, int tx, user_phy
         view->source = tx ? "tx" : "rx";
         break;
     case BB_ROLE_DEV:
-        view->user = tx ? BB_USER_0 : BB_USER_BR_CS;
+        view->user = tx ? dev_tx_user : BB_USER_BR_CS;
         view->source = tx ? "tx" : "rx";
         break;
     default:
@@ -153,7 +194,7 @@ static void print_user_phy_view(const char *dir, const user_phy_view_t *view, in
            phy->tintlv_num);
 }
 
-static void print_user_phy_status(const bb_get_status_out_t *status)
+static void print_user_phy_status(const bb_get_status_out_t *status, int dev_tx_user)
 {
     user_phy_view_t rx_view;
     user_phy_view_t tx_view;
@@ -161,7 +202,8 @@ static void print_user_phy_status(const bb_get_status_out_t *status)
     const char *major_dir;
 
     printf("\nuser phy status:\n");
-    if (get_user_phy_view(status, 0, &rx_view) || get_user_phy_view(status, 1, &tx_view)) {
+    if (get_user_phy_view(status, 0, dev_tx_user, &rx_view) ||
+        get_user_phy_view(status, 1, dev_tx_user, &tx_view)) {
         printf("  unavailable: unsupported role=%u\n", status->role);
         return;
     }
@@ -191,11 +233,25 @@ static void usage(const char *prog)
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
     printf("  -l              list devices and exit\n");
-    printf("  -s <slot>       remote slot id for -R, default: 0; DEV uses slot 0 as AP\n");
     printf("  -S              query BB_GET_STATUS\n");
     printf("  -V              query BB_GET_SYS_INFO\n");
-    printf("  -R              query peer device by remote ioctl through -s <slot>\n");
+    printf("  -B              query BB_GET_BOOT_REASON\n");
+    printf("  -R [slot]       query peer device by remote ioctl, default remote slot: 0\n");
     printf("  -A              query all basic information, default action\n");
+}
+
+static int parse_slot(const char *text, const char *name, int *out)
+{
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+
+    if (end == text || *end != '\0' || value < 0 || value >= BB_SLOT_MAX) {
+        printf("invalid %s: %s, valid range: 0-%d\n", name, text, BB_SLOT_MAX - 1);
+        return -1;
+    }
+
+    *out = (int)value;
+    return 0;
 }
 
 static int list_devices(const char *addr, int port)
@@ -315,6 +371,8 @@ static int query_status(bb_dev_handle_t *handle, int remote_slot)
 {
     bb_get_status_in_t input;
     bb_get_status_out_t status;
+    bb_get_dev_connect_slot_out_t connect_slot;
+    int dev_tx_user = BB_USER_0;
     int ret;
 
     memset(&input, 0, sizeof(input));
@@ -335,6 +393,39 @@ static int query_status(bb_dev_handle_t *handle, int remote_slot)
             printf("BB_GET_STATUS failed, ret=%d\n", ret);
         }
         return ret;
+    }
+
+    if (status.role == BB_ROLE_DEV) {
+        memset(&connect_slot, 0, sizeof(connect_slot));
+        ret = basic_info_ioctl(handle,
+                               BB_GET_DEV_CONNECT_SLOT,
+                               NULL,
+                               0,
+                               &connect_slot,
+                               sizeof(connect_slot),
+                               remote_slot);
+        if (ret) {
+            if (remote_slot >= 0) {
+                printf("BB_GET_DEV_CONNECT_SLOT remote slot=%d failed, ret=%d\n",
+                       remote_slot,
+                       ret);
+            } else {
+                printf("BB_GET_DEV_CONNECT_SLOT failed, ret=%d\n", ret);
+            }
+            return ret;
+        }
+
+        if (connect_slot.slot >= BB_SLOT_MAX || connect_slot.slot >= BB_DATA_USER_MAX) {
+            if (remote_slot >= 0) {
+                printf("BB_GET_DEV_CONNECT_SLOT remote slot=%d returned invalid slot=%u\n",
+                       remote_slot,
+                       connect_slot.slot);
+            } else {
+                printf("BB_GET_DEV_CONNECT_SLOT returned invalid slot=%u\n", connect_slot.slot);
+            }
+            return -1;
+        }
+        dev_tx_user = connect_slot.slot;
     }
 
     if (remote_slot >= 0) {
@@ -372,25 +463,62 @@ static int query_status(bb_dev_handle_t *handle, int remote_slot)
         printf("\n");
     }
 
-    print_user_phy_status(&status);
+    print_user_phy_status(&status, dev_tx_user);
 
     return 0;
 }
+
+static int query_boot_reason(bb_dev_handle_t *handle, int remote_slot)
+{
+    bb_get_boot_reason_out_t reason;
+    int ret;
+
+    memset(&reason, 0, sizeof(reason));
+    ret = basic_info_ioctl(handle,
+                           BB_GET_BOOT_REASON,
+                           NULL,
+                           0,
+                           &reason,
+                           sizeof(reason),
+                           remote_slot);
+    if (ret) {
+        if (remote_slot >= 0) {
+            printf("BB_GET_BOOT_REASON remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_BOOT_REASON failed, ret=%d\n", ret);
+        }
+        return ret;
+    }
+
+    if (remote_slot >= 0) {
+        printf("\n[BB_GET_BOOT_REASON remote slot=%d]\n", remote_slot);
+    } else {
+        printf("\n[BB_GET_BOOT_REASON]\n");
+    }
+    printf("boot_reason : %s (%u)\n", boot_reason_name(reason.boot_reason), reason.boot_reason);
+    printf("pc          : 0x%08x\n", reason.pc);
+    printf("ra          : 0x%08x\n", reason.ra);
+    printf("ex_data     : 0x%08x\n", reason.ex_data);
+    printf("repeat_time : %u\n", reason.repeat_time);
+    printf("desc        : %.*s\n", (int)sizeof(reason.desc), reason.desc);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *addr = "127.0.0.1";
     int port = BB_PORT_DEFAULT;
     int dev_index = 0;
-    int slot = 0;
+    int remote_slot = -1;
     int do_status = 0;
     int do_sys_info = 0;
-    int remote = 0;
+    int do_boot_reason = 0;
     int list_only = 0;
     int opt;
     int ret;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:ls:SVRA")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:lSVBR::A")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -407,21 +535,35 @@ int main(int argc, char **argv)
         case 'l':
             list_only = 1;
             break;
-        case 's':
-            slot = (int)strtol(optarg, NULL, 10);
-            break;
         case 'S':
             do_status = 1;
             break;
         case 'V':
             do_sys_info = 1;
             break;
-        case 'R':
-            remote = 1;
+        case 'B':
+            do_boot_reason = 1;
             break;
+        case 'R': {
+            const char *slot_text = optarg;
+
+            if (remote_slot >= 0) {
+                printf("-R may only be specified once\n");
+                return -1;
+            }
+            remote_slot = BB_SLOT_0;
+            if (!slot_text && optind < argc && argv[optind][0] != '-') {
+                slot_text = argv[optind++];
+            }
+            if (slot_text && parse_slot(slot_text, "remote slot", &remote_slot)) {
+                return -1;
+            }
+            break;
+        }
         case 'A':
             do_status = 1;
             do_sys_info = 1;
+            do_boot_reason = 1;
             break;
         default:
             usage(argv[0]);
@@ -434,13 +576,14 @@ int main(int argc, char **argv)
         return ret ? -1 : 0;
     }
 
-    if (!do_status && !do_sys_info) {
+    if (!do_status && !do_sys_info && !do_boot_reason) {
         do_status = 1;
         do_sys_info = 1;
+        do_boot_reason = 1;
     }
 
-    if (slot < 0 || slot >= BB_SLOT_MAX) {
-        printf("invalid slot %d, valid range: 0-%d\n", slot, BB_SLOT_MAX - 1);
+    if (optind < argc) {
+        printf("unexpected argument: %s\n", argv[optind]);
         return -1;
     }
 
@@ -450,14 +593,21 @@ int main(int argc, char **argv)
     }
 
     if (do_sys_info) {
-        ret = query_sys_info(ctx.handle, remote ? slot : -1);
+        ret = query_sys_info(ctx.handle, remote_slot);
+        if (ret) {
+            goto done;
+        }
+    }
+
+    if (do_boot_reason) {
+        ret = query_boot_reason(ctx.handle, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_status) {
-        ret = query_status(ctx.handle, remote ? slot : -1);
+        ret = query_status(ctx.handle, remote_slot);
         if (ret) {
             goto done;
         }

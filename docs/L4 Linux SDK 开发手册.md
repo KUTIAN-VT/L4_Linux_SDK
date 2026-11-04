@@ -364,18 +364,19 @@ upgrade done
 | `-I, --tap-ip <ip>`    | 指定 TAP 设备 IP，必填     | 无       |
 | `-d, --dev <dev>`      | 指定 TAP 设备名          | `tap0`  |
 | `-v, --debug`          | 打开网络透传调试打印          | 关闭      |
-| `-k, --force-close-on-open-fail` | socket 打开失败时强制关闭同 slot/transport 的 socket 并重试一次 | 关闭 |
+| `-e, --encrypt-mode <mode>` | 启用 socket 加密，可选 `default`、`aes128`、`aes256` | 关闭 |
+| `-k, --encrypt-key <hex>` | AES 密钥；AES128 为 16 字节，AES256 为 32 字节 | 无 |
 | `-r, --rx_buf <len>`   | 指定 RX buffer 长度     | `40000` |
 | `-t, --tx_buf <len>`   | 指定 TX buffer 长度     | `60000` |
 
 
 `-I` 是网络透传工具的关键参数，用于给 TAP 虚拟网卡配置 IP。两端设备应配置在同一网段，并避免 IP 冲突。
 
-如果异常退出后再次启动提示基带 socket 创建失败，可增加 `-k`。该参数会在首次打开当前 `-u` 和 `-P` 指定的 socket 失败时调用 `BB_FORCE_CLS_SOCKET`，等待 200ms 后自动重试一次。
+不指定 `-e` 时使用普通 socket。`-e default` 启用固件默认加密且不需要密钥；`-e aes128` 和 `-e aes256` 必须通过 `-k` 分别提供 16 字节和 32 字节密钥。密钥按十六进制填写，每字节两位，可连续书写，也可使用空格、冒号或逗号分隔。AP 和 DEV 两端必须配置相同的加密模式和密钥。
 
-`l4_tuntap` 启动时使用 `-i` 选择设备，并记录该设备的 MAC/序列号。运行期间如果设备断开或 socket 失效，程序会关闭旧 socket 和设备句柄，每 2 秒重新扫描一次设备；每次失败都会打印尝试序号、失败阶段和下次等待时间。同一 MAC/序列号的设备重新上线后，程序会使用设备最新的 working ID 重新打开 socket，并打印成功所在的尝试序号，无需重启 `l4_tuntap`。断线期间从 TAP 读取的报文会被丢弃，不会在恢复后补发。
+首次打开或自动重连时，如果基带 socket 创建失败，程序会调用 `BB_FORCE_CLS_SOCKET` 强制关闭当前 slot/transport 上的残留 socket，等待 200ms 后自动重试一次，无需额外开关参数。
 
-自动重连同样遵循 `-k` 设置：未指定 `-k` 时只持续尝试正常打开 socket；指定 `-k` 后，每次设备重新打开但 socket 创建失败时，会强制关闭当前 slot/transport 上的残留 socket 并重试一次。
+`l4_tuntap` 启动时使用 `-i` 选择设备，并记录该设备的 MAC/序列号。运行期间如果设备断开或 socket 失效，程序会关闭旧 socket 和设备句柄，每 2 秒重新扫描一次设备；每次失败都会打印尝试序号、失败阶段和下次等待时间。同一 MAC/序列号的设备重新上线后，程序会使用设备最新的 working ID 和启动时的加密配置重新打开 socket，并打印成功所在的尝试序号，无需重启 `l4_tuntap`。断线期间从 TAP 读取的报文会被丢弃，不会在恢复后补发。
 
 #### 2.2 标准使用方法
 
@@ -400,10 +401,22 @@ DEV 侧配置 TAP IP：
 sudo ./l4_tuntap -I 192.168.144.66 -d tap0
 ```
 
+AES128 加密示例（AP 和 DEV 使用相同密钥）：
+
+```sh
+# AP
+sudo ./l4_tuntap -I 192.168.144.55 -d tap0 -e aes128 -k 00112233445566778899aabbccddeeff
+
+# DEV
+sudo ./l4_tuntap -I 192.168.144.66 -d tap0 -e aes128 -k 00112233445566778899aabbccddeeff
+```
+
+程序不会打印密钥；断线自动重连时会继续使用启动时配置的加密模式和密钥。
+
 `l4_tuntap` 正常启动输出示例：
 
 ```text
-l4_tuntap args: -u 0 -P 3 -I 192.168.144.55 -d tap0 -r 40000 -t 60000 -k 0
+l4_tuntap args: -u 0 -P 3 -I 192.168.144.55 -d tap0 -r 40000 -t 60000 encryption=disabled
 dev = tap0,ip = 192.168.144.55,mtu = 4000 , tun_fd = 4
 lgeng - 0  ar_bb_socket_fd = 0
 ```
@@ -510,9 +523,11 @@ bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 
 > 2026-07-10 同步说明：SDK 已同步原厂 `ar8030-coolsky-sdk-1.3.02-28-release-20260708` 的 Socket 加密、MCS 模式查询和频宽模式查询接口。`bb_sock_opt_t`、`bb_auto_band_para_t`、`ar_netif_t` 等公共结构发生变化，客户端库、daemon 和应用应作为同一版本整体清理重编。普通 Socket 保持旧版 12 字节创建协议兼容；加密 Socket 要求新版客户端、daemon 和固件配套使用。
 
+> 2026-09-07 同步说明：SDK 已对齐 SDK 1.3.02-30，新增 `BB_GET_SOCKET_ENCRYPT` 实时查询，以及 `PRJ_CMD_SET_SOCK_ENCRYPT`、`PRJ_CMD_GET_SOCK_ENCRYPT` 持久加密配置接口；L4 既有 Socket 协议校验与加密参数安全检查继续保留。
+
 ### 1、信息查询示例
 
-`l4_basic_info` 用于查询设备基础信息，包括系统版本、角色、模式、MAC、slot 链路状态和 user phy 状态。
+`l4_basic_info` 用于查询设备基础信息，包括系统版本、重启原因、角色、模式、MAC、slot 链路状态和 user phy 状态。
 
 #### 1.1 程序参数说明
 
@@ -521,18 +536,28 @@ bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 | ---- | ------------------------------ | ---- |
 | `-S` | 查询 `BB_GET_STATUS`，打印设备状态和链路状态 | 无    |
 | `-V` | 查询 `BB_GET_SYS_INFO`，打印系统和版本信息 | 无    |
+| `-B` | 查询 `BB_GET_BOOT_REASON`，打印重启原因和诊断信息 | 无    |
 | `-A` | 查询全部基础信息                       | 默认动作 |
 | `-l` | 查看 daemon 当前设备列表，不打开设备          | 无    |
+| `-R [slot]` | 通过远程 ioctl 查询对端，参数为 remote slot | 不启用，slot 默认 `0` |
 
 
-如果不指定 `-S`、`-V` 或 `-A`，程序默认执行全量查询。
+如果不指定 `-S`、`-V`、`-B` 或 `-A`，程序默认执行全量查询，依次读取系统信息、重启原因和设备状态。
 
 #### 1.2 标准使用方法
 
 1. 启动 `l4_daemon`。
 2. 如有多个设备，可先执行 `l4_basic_info -l` 查看设备列表，再用 `-i <index>` 选择目标设备。
 3. 执行 `l4_basic_info` 查询基础状态。
-4. 根据输出确认设备角色、工作模式、版本和链路状态。
+4. 根据输出确认设备角色、工作模式、版本、重启原因和链路状态。
+
+1v1 场景远程查询对端全部基础信息：
+
+```sh
+./l4_basic_info -R 0
+```
+
+基础信息命令自身没有目标 slot，因此本例程不使用 `-s`；`-R 0` 直接指定外层远程调用的 slot。
 
 #### 1.3 示例
 
@@ -542,7 +567,7 @@ bb_dev_close() / bb_dev_freelist() / bb_host_disconnect()
 ./l4_basic_info -l
 ```
 
-`-l` 只连接 daemon 并打印 `device[index]` 和 MAC，不会打开设备，也不会执行 `BB_GET_SYS_INFO` 或 `BB_GET_STATUS`。
+`-l` 只连接 daemon 并打印 `device[index]` 和 MAC，不会打开设备，也不会执行 `BB_GET_SYS_INFO`、`BB_GET_BOOT_REASON` 或 `BB_GET_STATUS`。
 
 ##### 1.3.2 查询全部基础信息：
 
@@ -593,6 +618,26 @@ user phy status:
   TX: user=8 source=tx freq=2395625KHz mcs_raw=2 mcs_real=0 bw=2.5MHz(1) tintlv_enable=1 tintlv_len=3 tintlv_num=0
   bw_mode=Y24X2 major_dir=DEV->AP
 ```
+
+##### 1.3.5 只查询设备重启原因：
+
+```sh
+./l4_basic_info -B
+```
+
+正常输出示例：
+
+```
+[BB_GET_BOOT_REASON]
+boot_reason : REBOOT (1)
+pc          : 0x00000000
+ra          : 0x00000000
+ex_data     : 0x00000000
+repeat_time : 1
+desc        : reboot
+```
+
+使用 `-R -B -s <slot>` 时，同一查询会通过远程 ioctl 发往指定对端。无法识别的原因值显示为 `UNKNOWN`，并保留原始数值。
 
 ### 2、配对管理示例
 
@@ -742,16 +787,16 @@ DEV 侧手动设置 AP MAC：
 | `-W`        | 查询 `BB_GET_BANDWIDTH_MODE` | 无    |
 | `-P`        | 查询 `BB_GET_CUR_POWER`      | 无    |
 | `-C`        | 查询 `BB_GET_CHAN_INFO`      | 无    |
-| `-R`        | 通过远程 ioctl 查询 `-s <slot>` 指定的对端，支持全量和单项查询 | 无    |
+| `-R [slot]` | 通过远程 ioctl 查询对端，参数为 remote slot，支持全量和单项查询 | 无，slot 默认 `0` |
 | `-B`        | 查询 `BB_GET_BAND_INFO`      | 无    |
-| `-T`        | 查询 `BB_GET_THROUGHPUT`     | 无    |
+| `-T`        | 查询 `BB_GET_THROUGHPUT`；DEV 未指定 `-s` 时自动获取连接 slot | 无    |
 | `-D`        | 查询 `BB_GET_DISTC_RESULT`   | 无    |
 | `-V`        | 查询 `BB_GET_1V1_INFO`       | 无    |
-| `-s <slot>` | 目标 slot；DEV 侧 slot 0 表示 AP | `0`  |
+| `-s <slot>` | 命令执行端内部的目标 slot；DEV 查询吞吐且省略时自动获取连接 slot | `0`  |
 | `-u <user>` | 指定 `-Q`/`-P` 的物理用户；未指定时 `-Q` 默认 AP=0、DEV=8，`-P` 默认 AP=8、DEV=0 | 见说明 |
 
 
-链路质量、实时 MCS、功率、吞吐和测距结果等细节需要在配对完成、链路连接后读取。程序会先查询 `BB_GET_STATUS` 判断目标 slot 是否可用。MCS 模式和频宽模式属于配置状态，不受配对/连接状态检查限制。未指定 `-u` 时会按实际查询端角色选择默认 user：`-Q` 在 AP 为 0、DEV 为 8；`-P` 在 AP 为 8、DEV 为 0。
+链路质量、实时 MCS、功率和测距结果等细节需要在配对完成、链路连接后读取。AP 角色查询吞吐也保留该检查；DEV 角色查询吞吐不检查对频状态，未指定 `-s` 时先通过 `BB_GET_DEV_CONNECT_SLOT` 获取其在 AP 上的连接 slot。程序仍会先查询 `BB_GET_STATUS` 判断实际执行端角色。MCS 模式和频宽模式属于配置状态，不受配对/连接状态检查限制。未指定 `-u` 时会按实际查询端角色选择默认 user：`-Q` 在 AP 为 0、DEV 为 8；`-P` 在 AP 为 8、DEV 为 0。
 
 #### 3.2 标准使用方法
 
@@ -759,8 +804,8 @@ DEV 侧手动设置 AP MAC：
 2. 使用 `l4_pair_manager` 完成 AP 和 DEV 配对。
 3. 执行 `l4_link_monitor` 查询全量链路信息。
 4. 根据需要通过 `-S/-Q/-M/-m/-W/-T/-V` 等参数查询指定信息。
-5. AP 侧通过 `-s` 指定目标 DEV 所在 slot；DEV 侧通常使用 `-s 0` 查看 AP 方向。
-6. 默认查询本机信息；需要查询对端时增加 `-R -s <slot>`，可配合 `-A/-S/-Q/-q/-M/-m/-W/-P/-C/-B/-T/-D/-V` 使用。
+5. AP 侧通过 `-s` 指定目标 DEV 所在 slot；DEV 侧其他查询通常使用 `-s 0` 查看 AP 方向，吞吐查询省略 `-s` 时会自动获取连接 slot。
+6. 默认查询本机信息；需要查询对端时增加 `-R <remote_slot>`，并用 `-s <slot>` 指定命令执行端内部的目标 slot。
 
 #### 3.3 示例
 
@@ -925,10 +970,10 @@ chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
   chan[31]: freq=5840000 KHz power=-100 dbm
 ```
 
-查询对端信息时，增加 `-R`，并通过 `-s <slot>` 指定对端所在 slot。例如 AP 侧查询 slot 0 的 DEV 信道信息：
+查询对端信息时，通过 `-R` 指定外层 remote slot，通过 `-s` 指定命令执行端内部的目标 slot。1v1 场景查询对端 slot 0 的信道信息：
 
 ```sh
-./l4_link_monitor -C -R -s 0
+./l4_link_monitor -C -R 0 -s 0
 ```
 
 输出标题会显示远程 slot：
@@ -940,7 +985,7 @@ chan_num=32 auto_mode=1 acs_chan=26 work_chan=30
   ...
 ```
 
-`-R` 会将查询命令封装进 `BB_REMOTE_IOCTL_REQ`，由 `-s` 指定的对端 slot 执行查询。不带 `-R` 时仍查询本机信息。`-R` 支持 `-A` 和所有单项查询参数，包括 `-S`、`-Q`、`-q`、`-M`、`-m`、`-W`、`-P`、`-C`、`-B`、`-T`、`-D`、`-V`。链路细节查询会先读取实际查询端的 `BB_GET_STATUS` 做 pair/connect 检查；MCS 模式和频宽模式查询不受该检查限制。
+`-R` 会将查询命令封装进 `BB_REMOTE_IOCTL_REQ`，其参数写入外层请求的 `slot`；`-s` 只写入具体查询命令的目标 slot。不带 `-R` 时仍查询本机信息。`-R` 支持 `-A` 和所有单项查询参数，包括 `-S`、`-Q`、`-q`、`-M`、`-m`、`-W`、`-P`、`-C`、`-B`、`-T`、`-D`、`-V`。链路细节查询会先读取实际查询端的 `BB_GET_STATUS` 做 pair/connect 检查；MCS 模式和频宽模式查询不受该检查限制。
 
 ##### 3.3.7 查询频段信息
 
@@ -961,11 +1006,16 @@ band_mode=AUTO(1) work_band=5G(2)
 ./l4_link_monitor -T
 ```
 
-正常输出示例：
+AP 角色使用默认 slot 0，并按现有链路状态判断是否查询；可通过 `-s` 指定其他 slot。DEV 角色不会检查对频状态，未指定 `-s` 时先调用 `BB_GET_DEV_CONNECT_SLOT`，再使用返回的连接 slot 查询吞吐；显式指定 `-s` 会覆盖自动选择。使用 `-R` 查询远端 DEV 时，这两个接口都在远端执行。
+
+DEV 未指定 `-s` 时的正常输出示例：
 
 ```text
+[BB_GET_DEV_CONNECT_SLOT]
+slot=1
+
 [BB_GET_THROUGHPUT]
-slot=0
+slot=1
   TX: phy=232960 real=26112
   RX: phy=11471040 real=53664
 ```
@@ -1008,7 +1058,8 @@ slot=0
 | `-P <power>`     | 调用 `BB_SET_POWER`，固定发射功率范围 `0-31 dBm`          | 不执行  |
 | `-u <user>`      | `BB_SET_POWER` 使用的物理用户                              | 按角色默认 |
 | `-F <0/1>`       | 调用 `BB_SET_FRAME_CHANGE`，仅 `SINGLE_USER` 模式支持    | 不执行  |
-| `-s <slot>`      | slot 编号，用于频宽和 MCS 配置；带 `-R` 时也是远程对端 slot      | `0`  |
+| `-s <slot>`      | 命令执行端内部的目标 slot，用于频宽和 MCS 配置      | `0`  |
+| `-R [slot]`      | 通过远程 ioctl 在对端执行，参数为 remote slot       | 不启用，slot 默认 `0` |
 
 
 如果没有指定任何设置动作，程序只打印帮助并返回错误，避免误操作。
@@ -1217,7 +1268,7 @@ slot link status:
 指定物理用户时使用 `-u <user>`。带 `-R` 时，`-O` 和 `-P` 都通过远程 ioctl 在对端执行：
 
 ```sh
-./l4_link_config -R -s 0 -O 0 -P 20
+./l4_link_config -R 0 -s 0 -O 0 -P 20
 ```
 
 ##### 4.3.7 帧结构切换
@@ -1289,11 +1340,10 @@ mode=0
 | `-g <file>` | 调用 `BB_GET_CFG`，导出配置到本地文件 | 不执行 |
 | `-s <file>` | 调用 `BB_SET_CFG`，把本地文件写入设备 | 不执行 |
 | `-r` | 调用 `BB_RESET_CFG`，恢复设备配置 | 不执行 |
-| `-R` | 通过远程 ioctl 操作对端设备 | 本机操作 |
-| `-S <slot>` | 指定 `-R` 使用的 remote slot | `0` |
+| `-R [slot]` | 通过远程 ioctl 操作对端设备，参数为 remote slot | 本机操作，slot 默认 `0` |
 | `-m <mode>` | `BB_GET_CFG` 读取模式，支持 `auto`、`memory`、`flash` 或 `0`、`1`、`2` | `auto` |
 
-`-g`、`-s`、`-r` 三个动作必须且只能指定一个，避免一次命令同时执行多个配置文件操作。`-R` 只改变执行端，`-S` 只能和 `-R` 一起使用。
+`-g`、`-s`、`-r` 三个动作必须且只能指定一个，避免一次命令同时执行多个配置文件操作。`-R` 只改变执行端并直接携带 remote slot。这里的 `-s <file>` 是写配置文件动作，不是 slot 参数。
 
 #### 5.2 示例
 
@@ -1324,25 +1374,25 @@ mode=0
 远程导出对端 slot 0 配置文件：
 
 ```sh
-./l4_config_file -R -g peer_cfg.json
+./l4_config_file -R 0 -g peer_cfg.json
 ```
 
 远程写入对端 slot 0 配置文件：
 
 ```sh
-./l4_config_file -R -s cfg.json
+./l4_config_file -R 0 -s cfg.json
 ```
 
 远程恢复对端 slot 0 配置文件：
 
 ```sh
-./l4_config_file -R -r
+./l4_config_file -R 0 -r
 ```
 
-远程导出指定 slot 的 flash 配置文件：
+远程导出对端 slot 0 的 flash 配置文件：
 
 ```sh
-./l4_config_file -R -S 1 -m flash -g peer_slot1_flash_cfg.json
+./l4_config_file -R 0 -m flash -g peer_slot0_flash_cfg.json
 ```
 
 导出时，程序会校验设备返回的 `total_length` 和 `total_crc16`；写入时，程序会先计算本地文件 CRC，再按 `bb_set_cfg_t.data` 最大长度分片下发。远程执行时标题会显示 `remote slot=<slot>`。
@@ -1350,7 +1400,7 @@ mode=0
 
 ### 6、MiniDB 配置示例
 
-`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段、功率和扩展功率等配置项。增加 `--remote` 后，查询、写入、重置和重启会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行，默认 remote slot 为 0。
+`l4_minidb_config` 用于演示通过 `BB_SET_PRJ_DISPATCH` 和 `BB_GET_PRJ_DISPATCH` 读写设备 MiniDB 持久化配置，包括角色、AP MAC、slot MAC、频段、功率和扩展功率等配置项。增加 `-R [slot]` 或 `--remote[=<slot>]` 后，查询、写入、重置和重启会通过 `BB_REMOTE_IOCTL_REQ` 在对端执行，默认 remote slot 为 0。
 
 MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 MiniDB 后，配置需要重启设备后才生效；建议设置或重置后使用 `-H` 重启设备，重启完成后再查询确认。
 
@@ -1366,7 +1416,7 @@ MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 
 | `-w` | `--get-pwr` | 查询 MiniDB 中保存的 power 配置 | 不执行 |
 | 无 | `--get-pwr-ex` | 查询 MiniDB 中保存的扩展功率配置 | 不执行 |
 | `-u` | `--get-uart-baudrate` | 查询 MiniDB 中保存的 UART2 波特率 | 不执行 |
-| `-R <ap|dev|0|1>` | `--set-role <...>` | 设置 MiniDB role | 不执行 |
+| 无 | `--set-role <ap|dev|0|1>` | 设置 MiniDB role | 不执行 |
 | `-M <mac>` | `--set-ap-mac <mac>` | 设置 MiniDB AP MAC | 不执行 |
 | `-S <mac|slot,mac>` | `--set-slot-mac <mac|slot,mac>` | 设置 MiniDB slot MAC | slot 0 |
 | `-B <auto|2g|5g|bitmap>` | `--set-band <...>` | 设置 MiniDB band bitmap | 不执行 |
@@ -1374,10 +1424,9 @@ MiniDB 修改的是持久化配置，不等同于当前运行态配置。修改 
 | `-U <baudrate>` | `--set-uart-baudrate <baudrate>` | 设置 MiniDB UART2 波特率 | 不执行 |
 | `-D` | `--reset` | 重置 MiniDB | 不执行 |
 | `-H` | `--reboot` | 单独重启设备，或设置/重置成功后重启设备 | 不执行 |
-| 无 | `--remote` | 通过远程 ioctl 操作对端设备 | 本机操作 |
-| 无 | `--remote-slot <slot>` | 指定 `--remote` 使用的 remote slot | `0` |
+| `-R [slot]` | `--remote[=<slot>]` | 通过远程 ioctl 操作对端设备，参数为 remote slot | 本机操作，slot 默认 `0` |
 
-每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`--remote` 只改变命令实际执行端，`--remote-slot` 只能和 `--remote` 一起使用；不新增远程短参数，因为 `-R` 已是 `--set-role`，`-S` 已是 `--set-slot-mac`。`-H` 可以单独作为重启动作，也可以附加在设置或重置动作后；`-H` 不能和查询动作组合。带 `--remote` 时，查询、写入、重置和重启都在对端执行。
+每次运行只允许一个主动作，例如不能同时指定 `-A` 和 `-B auto`。`-R`/`--remote` 只改变命令实际执行端和外层 remote slot；`-s`、`-S` 中的 slot 仍表示 MiniDB 命令内部的目标 slot。`-H` 可以单独作为重启动作，也可以附加在设置或重置动作后；`-H` 不能和查询动作组合。带 `-R` 时，查询、写入、重置和重启都在对端执行。
 
 #### 6.2 输入格式
 
@@ -1410,42 +1459,42 @@ UART 波特率配置固定操作 UART2。`-U <baudrate>` 只修改 MiniDB 中 UA
 
 #### 6.3 示例
 
-以下示例按“先设置，再查询确认”的顺序组织。由于程序每次运行只允许一个主动作，设置和查询需要分两次执行；如果需要确认设备运行态是否生效，设置后先使用 `-H` 重启设备，重启完成后再查询。远程操作时在命令中增加 `--remote`，非默认对端使用 `--remote-slot <slot>`。
+以下示例按“先设置，再查询确认”的顺序组织。由于程序每次运行只允许一个主动作，设置和查询需要分两次执行；如果需要确认设备运行态是否生效，设置后先使用 `-H` 重启设备，重启完成后再查询。1v1 场景远程操作统一增加 `-R 0`。
 
 远程查询对端全部 MiniDB 信息：
 
 ```sh
-./l4_minidb_config --remote -A
+./l4_minidb_config -R 0 -A
 ```
 
 远程写入对端 MiniDB role：
 
 ```sh
-./l4_minidb_config --remote -R ap
+./l4_minidb_config -R 0 --set-role ap
 ```
 
 远程写入对端 slot MAC：
 
 ```sh
-./l4_minidb_config --remote -S 1,11:22:33:44
+./l4_minidb_config -R 0 -S 0,11:22:33:44
 ```
 
 远程重置对端 MiniDB：
 
 ```sh
-./l4_minidb_config --remote -D
+./l4_minidb_config -R 0 -D
 ```
 
 远程重启对端设备：
 
 ```sh
-./l4_minidb_config --remote -H
+./l4_minidb_config -R 0 -H
 ```
 
-远程操作指定 remote slot，并在写入成功后重启对端：
+通过 remote slot 0 写入并重启对端：
 
 ```sh
-./l4_minidb_config --remote --remote-slot 1 -B auto -H
+./l4_minidb_config -R 0 -B auto -H
 ```
 
 ##### 6.3.1 设置 role 为 AP 后查询
@@ -1453,7 +1502,7 @@ UART 波特率配置固定操作 UART2。`-U <baudrate>` 只修改 MiniDB 中 UA
 将 MiniDB role 设置为 AP：
 
 ```sh
-./l4_minidb_config -R ap
+./l4_minidb_config --set-role ap
 ```
 
 正常调用示例：
@@ -1482,7 +1531,7 @@ role=AP(0)
 将 MiniDB role 设置为 DEV：
 
 ```sh
-./l4_minidb_config -R dev
+./l4_minidb_config --set-role dev
 ```
 
 正常调用示例：
@@ -1937,7 +1986,7 @@ uart2_baudrate=115200
 
 | 参数 | 长参数 | 说明 |
 | --- | --- | --- |
-| `-s <slot>` | `--slot <slot>` | 通过 remote ioctl slot 执行命令 |
+| `-R [slot]` | `--remote[=<slot>]` | 通过 remote ioctl 在对端执行，remote slot 默认 `0` |
 
 每次运行只允许一个主动作：`--get-uart` 或 `--set-uart` 二选一。设置动作不会自动查询，设置后如需确认，请再次执行 `--get-uart`。
 
@@ -1964,7 +2013,7 @@ uart2_baudrate=115200
 通过 remote ioctl slot 0 查询 UART 1：
 
 ```sh
-./l4_uart_config -s 0 -g 1
+./l4_uart_config -R 0 -g 1
 ```
 
 ### 8、Socket 收发示例
@@ -1985,6 +2034,8 @@ uart2_baudrate=115200
 | `-i <index>` | `--index <index>` | 设备序号 | `0` |
 | `-s <slot>` | `--slot <slot>` | 目标 slot，DEV 侧 `0` 表示 AP | `0` |
 | `-P <port>` | `--socket-port <port>` | socket 逻辑端口 | `1` |
+| 无 | `--rx-buf <bytes>` | RX buffer 长度（字节） | `4000` |
+| 无 | `--tx-buf <bytes>` | TX buffer 长度（字节） | `6000` |
 | 无 | `--encrypt-mode <mode>` | 启用加密，可选 `default`、`aes128`、`aes256` | 不启用 |
 | 无 | `--encrypt-key <hex>` | AES 密钥；AES128 为 32 个十六进制字符，AES256 为 64 个 | 无 |
 
@@ -1998,7 +2049,7 @@ uart2_baudrate=115200
 | `-X` | `--hex-input` | 十六进制输入模式，持续读取用户输入的十六进制行并发送 |
 | `-r` | `--recv` | 持续接收数据直到 `Ctrl-C` |
 
-每次运行必须且只能指定一个主动作。`--hex` 和 `--hex-input` 要求每个字节使用两个十六进制字符，例如 `0a`，支持 `01020aff`、`01:02:0a:ff` 或 `01 02 0a ff`。输入模式期间空行会被跳过；文本输入模式按原始文本字节发送，十六进制输入模式按十六进制字节发送。
+每次运行必须且只能指定一个主动作。`--rx-buf` 和 `--tx-buf` 接受 1 到 `UINT32_MAX` 的十进制字节数。`--hex` 和 `--hex-input` 要求每个字节使用两个十六进制字符，例如 `0a`，支持 `01020aff`、`01:02:0a:ff` 或 `01 02 0a ff`。输入模式期间空行会被跳过；文本输入模式按原始文本字节发送，十六进制输入模式按十六进制字节发送。
 
 `default` 模式不使用 `--encrypt-key`。`aes128` 和 `aes256` 必须分别提供 16 字节和 32 字节密钥；仅指定 key 而未指定 `--encrypt-mode` 会被拒绝。
 
@@ -2048,6 +2099,106 @@ uart2_baudrate=115200
 ./l4_socket_transfer -s 0 -P 1 --hex-input
 ```
 
+### 9、Socket Port 实时与持久加密示例
+
+`l4_socket_encrypt` 默认使用 `BB_SET_FORCE_UPD_SOCKET_ENC` 和 `BB_GET_SOCKET_ENCRYPT` 操作运行态 socket；增加 `--minidb` 后，通过项目 RPC 查询或写入 MiniDB 持久配置。持久写入不更新当前 socket，在设备重启或相关 socket 重建时生效。默认操作本端，增加 `-R` 后操作对端。
+
+运行前请启动 `l4_daemon`，确认实际执行端上的目标 socket port 已经创建。远程模式只操作对端，不同时操作本端；通信两端仍需配置相同模式和密钥。
+
+#### 9.1 程序参数说明
+
+公共参数：
+
+| 参数 | 长参数 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `-h` | `--help` | 打印帮助 | 无 |
+| `-a <addr>` | `--addr <addr>` | daemon 地址 | `127.0.0.1` |
+| `-p <port>` | `--port <port>` | daemon 端口 | `BB_PORT_DEFAULT` |
+| `-i <index>` | `--index <index>` | 设备序号 | `0` |
+| `-R [slot]` | `--remote[=<slot>]` | 通过 remote ioctl 在对端执行，remote slot 默认 `0` | 不启用 |
+| `-s <slot>` | `--slot <slot>` | 目标 slot，DEV 侧 `0` 表示 AP | `0` |
+| `-P <port>` | `--socket-port <port>` | 目标 socket port，必须指定 | 无 |
+| `-g` | `--get` | 查询目标 port 的加密配置 | 不启用 |
+| 无 | `--minidb` | 改为读写 MiniDB 持久配置 | 不启用 |
+
+操作参数：
+
+| 参数 | 长参数 | 说明 |
+| --- | --- | --- |
+| `-e <mode>` | `--encrypt-mode <mode>` | 启用或更新加密：`default`、`aes128`、`aes256` |
+| `-d` | `--disable` | 关闭目标 port 的加密 |
+| `-k <hex>` | `--encrypt-key <hex>` | AES128 使用 16 字节 key，AES256 使用 32 字节 key |
+
+查询时单独使用 `-g`；设置时 `-e` 和 `-d` 必须且只能指定一个。`-g` 不能与 `-e`、`-d` 或 `-k` 同时使用。`default` 和关闭操作不使用 key；AES128、AES256 必须提供长度完全匹配的十六进制 key。MiniDB 模式的 port 范围为 `0-3`，未配置项显示 `state=unset`。运行态查询不返回密钥；MiniDB 查询会显示 AES 模式的完整有效密钥，并在输出后清零内部缓存。
+
+`-R` 默认通过 remote slot 0 在对端执行。1v1 场景统一使用 `-R 0 -s 0`：前者写入外层远程请求的 slot，后者表示命令执行端内部的目标 socket slot；远程操作不会同时修改本端。
+
+#### 9.2 示例
+
+查询本端 slot 0、port 1：
+
+```sh
+./l4_socket_encrypt -P 1 -g
+```
+
+通过 remote slot 0 查询对端内部 slot 0、port 1：
+
+```sh
+./l4_socket_encrypt -R 0 -s 0 -P 1 -g
+```
+
+查询输出包含 `enabled` 和 `mode`，不返回或打印密钥。
+
+保存并查询本端 slot 0、port 1 的 AES128 MiniDB 配置：
+
+```sh
+./l4_socket_encrypt --minidb -s 0 -P 1 -e aes128 \
+  -k 0102030405060708090a0b0c0d0e0f10
+./l4_socket_encrypt --minidb -s 0 -P 1 -g
+```
+
+通过 remote slot 0 保存对端 MiniDB 配置：
+
+```sh
+./l4_socket_encrypt -R 0 --minidb -s 0 -P 1 -e aes128 \
+  -k 0102030405060708090a0b0c0d0e0f10
+```
+
+MiniDB 设置成功只代表配置已持久化；如需立即改变当前 socket，仍需再执行不带 `--minidb` 的运行态设置命令。
+
+为 slot 0、port 1 启用默认加密：
+
+```sh
+./l4_socket_encrypt -P 1 -e default
+```
+
+为 slot 0、port 1 实时切换为 AES128：
+
+```sh
+./l4_socket_encrypt -P 1 -e aes128 \
+  -k 0102030405060708090a0b0c0d0e0f10
+```
+
+从 AP 远程配置 slot 0 对端设备内部的 slot 0、port 1：
+
+```sh
+./l4_socket_encrypt -R 0 -s 0 -P 1 -e aes128 \
+  -k 0102030405060708090a0b0c0d0e0f10
+```
+
+1v1 场景中远程路由使用 `-R 0`，DEV 内部代表 AP 的 socket slot 也使用 `-s 0`：
+
+```sh
+./l4_socket_encrypt -R 0 -s 0 -P 1 -e aes128 \
+  -k 0102030405060708090a0b0c0d0e0f10
+```
+
+关闭 slot 0、port 1 的加密：
+
+```sh
+./l4_socket_encrypt -P 1 -d
+```
+
 ## 四、高级构建
 
 通常优先使用 `script/` 下的脚本。只有需要手动控制 CMake 参数、只构建部分 target、或排查交叉编译配置时，才建议直接执行 CMake 命令。
@@ -2092,6 +2243,7 @@ cmake --build L4_Linux_SDK/build/x86_64 --target \
   l4_minidb_config \
   l4_uart_config \
   l4_socket_transfer \
+  l4_socket_encrypt \
   l4_daemon \
   -j
 
@@ -2124,6 +2276,7 @@ cmake --build L4_Linux_SDK/build/arm64 --target \
   l4_minidb_config \
   l4_uart_config \
   l4_socket_transfer \
+  l4_socket_encrypt \
   l4_daemon \
   -j
 

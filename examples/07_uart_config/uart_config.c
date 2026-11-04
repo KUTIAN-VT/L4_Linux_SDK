@@ -20,7 +20,7 @@ typedef struct {
     int port;
     int dev_index;
     action_t action;
-    int ioctl_slot;
+    int remote_slot;
     int uart_id;
     int set_param_seen;
     uint32_t baudrate;
@@ -54,7 +54,8 @@ static void usage(const char *prog)
     printf("  -A, --apply             apply to running system\n");
     printf("\n");
     printf("Other options:\n");
-    printf("  -s, --slot <slot>       remote ioctl slot id\n");
+    printf("  -R [slot], --remote[=<slot>]\n");
+    printf("                           operate peer by remote ioctl, default remote slot: 0\n");
 }
 
 static int str_eq_ignore_case(const char *a, const char *b)
@@ -77,7 +78,7 @@ static void init_options(options_t *opts)
     opts->port = BB_PORT_DEFAULT;
     opts->dev_index = 0;
     opts->action = ACTION_NONE;
-    opts->ioctl_slot = -1;
+    opts->remote_slot = -1;
     opts->uart_id = -1;
     opts->baudrate = 115200;
     opts->dbit = 8;
@@ -178,7 +179,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
         OPT_STOP_BIT,
         OPT_RX_BUF_SIZE,
         OPT_APPLY,
-        OPT_SLOT,
+        OPT_REMOTE,
         OPT_ADDR,
         OPT_PORT,
         OPT_INDEX,
@@ -194,7 +195,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
         {"stop-bit", required_argument, NULL, OPT_STOP_BIT},
         {"rx-buf-size", required_argument, NULL, OPT_RX_BUF_SIZE},
         {"apply", no_argument, NULL, OPT_APPLY},
-        {"slot", required_argument, NULL, OPT_SLOT},
+        {"remote", optional_argument, NULL, OPT_REMOTE},
         {"addr", required_argument, NULL, OPT_ADDR},
         {"port", required_argument, NULL, OPT_PORT},
         {"index", required_argument, NULL, OPT_INDEX},
@@ -206,7 +207,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
 
     init_options(opts);
 
-    while ((opt = getopt_long(argc, argv, "ha:p:i:g:U:b:d:P:T:r:As:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "ha:p:i:g:U:b:d:P:T:r:AR::", long_options, NULL)) != -1) {
         int int_value;
         uint32_t u32_value;
 
@@ -286,12 +287,29 @@ static int parse_options(int argc, char **argv, options_t *opts)
             opts->apply = 1;
             opts->set_param_seen = 1;
             break;
-        case 's':
-        case OPT_SLOT:
-            if (parse_int_range(optarg, 0, 255, "slot", &opts->ioctl_slot)) {
+        case 'R':
+        case OPT_REMOTE: {
+            const char *slot_text = optarg;
+
+            if (opts->remote_slot >= 0) {
+                printf("-R/--remote may only be specified once\n");
+                return -1;
+            }
+            opts->remote_slot = BB_SLOT_0;
+            if (!slot_text && optind < argc &&
+                strcmp(argv[optind - 1], "-R") == 0 && argv[optind][0] != '-') {
+                slot_text = argv[optind++];
+            }
+            if (slot_text &&
+                parse_int_range(slot_text,
+                                BB_SLOT_0,
+                                BB_SLOT_MAX - 1,
+                                "remote slot",
+                                &opts->remote_slot)) {
                 return -1;
             }
             break;
+        }
         default:
             usage(argv[0]);
             return -1;
@@ -322,13 +340,13 @@ static int ar8030_ioctl(bb_dev_handle_t *handle,
                         size_t in_len,
                         void *out,
                         size_t out_len,
-                        int ioctl_slot)
+                        int remote_slot)
 {
     bb_remote_ioctl_in_t remote_in;
     bb_remote_ioctl_out_t remote_out;
     int ret;
 
-    if (ioctl_slot < 0) {
+    if (remote_slot < 0) {
         return bb_ioctl(handle, request, in, out);
     }
 
@@ -344,7 +362,7 @@ static int ar8030_ioctl(bb_dev_handle_t *handle,
         memcpy(remote_in.data, in, in_len);
     }
     remote_in.len = (uint16_t)in_len;
-    remote_in.slot = (uint8_t)ioctl_slot;
+    remote_in.slot = (uint8_t)remote_slot;
     remote_in.msg_id = request;
 
     ret = bb_ioctl(handle, BB_REMOTE_IOCTL_REQ, &remote_in, &remote_out);
@@ -412,13 +430,17 @@ static int set_uart_config(bb_dev_handle_t *handle, const options_t *opts)
                        sizeof(request),
                        NULL,
                        0,
-                       opts->ioctl_slot);
+                       opts->remote_slot);
     if (ret) {
         printf("BB_SET_PRJ_DISPATCH cmd=%u failed, ret=%d\n", PRJ_CMD_SET_UART, ret);
         return ret;
     }
 
-    printf("[PRJ_CMD_SET_UART]\n");
+    if (opts->remote_slot >= 0) {
+        printf("[PRJ_CMD_SET_UART remote slot=%d]\n", opts->remote_slot);
+    } else {
+        printf("[PRJ_CMD_SET_UART]\n");
+    }
     print_uart_config(payload.id, &payload);
     printf("apply=%u\n", payload.apply);
     printf("set uart config ok\n");
@@ -453,7 +475,7 @@ static int get_uart_config(bb_dev_handle_t *handle, const options_t *opts, int r
                        sizeof(request),
                        &response,
                        sizeof(response),
-                       opts->ioctl_slot);
+                       opts->remote_slot);
     if (ret) {
         printf("BB_GET_PRJ_DISPATCH cmd=%u source=%s failed, ret=%d\n",
                PRJ_CMD_GET_UART,
@@ -465,7 +487,11 @@ static int get_uart_config(bb_dev_handle_t *handle, const options_t *opts, int r
     out_hdr = (prj_rpc_hdr_t *)response.data;
     memcpy(&output, out_hdr->data, sizeof(output));
 
-    printf("[PRJ_CMD_GET_UART]\n");
+    if (opts->remote_slot >= 0) {
+        printf("[PRJ_CMD_GET_UART remote slot=%d]\n", opts->remote_slot);
+    } else {
+        printf("[PRJ_CMD_GET_UART]\n");
+    }
     printf("source=%s\n", uart_source_name(running));
     print_uart_config(input.id, &output);
     return 0;

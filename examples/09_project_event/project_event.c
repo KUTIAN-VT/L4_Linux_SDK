@@ -40,7 +40,7 @@ static void usage(const char *prog)
     printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
-    printf("  -s <slot>       remote slot for send mode, default: 0\n");
+    printf("  -R [slot]       remote slot for send mode, default: 0\n");
     printf("  -r              receive BB_EVENT_PRJ_DISPATCH events\n");
     printf("  -t <state>      send state to the peer: armed or disarmed\n");
 }
@@ -165,7 +165,7 @@ static int receive_events(bb_dev_handle_t *handle)
     return ret;
 }
 
-static int send_event(bb_dev_handle_t *handle, int slot, uint8_t state)
+static int send_event(bb_dev_handle_t *handle, int remote_slot, uint8_t state)
 {
     bb_set_prj_dispatch_in_t request;
     bb_remote_ioctl_in_t remote_in;
@@ -182,20 +182,20 @@ static int send_event(bb_dev_handle_t *handle, int slot, uint8_t state)
 
     memset(&remote_in, 0, sizeof(remote_in));
     memset(&remote_out, 0, sizeof(remote_out));
-    remote_in.slot = (uint8_t)slot;
+    remote_in.slot = (uint8_t)remote_slot;
     remote_in.len = sizeof(request);
     remote_in.msg_id = BB_SET_PRJ_DISPATCH;
     memcpy(remote_in.data, &request, sizeof(request));
 
     ret = bb_ioctl(handle, BB_REMOTE_IOCTL_REQ, &remote_in, &remote_out);
     if (ret) {
-        printf("BB_REMOTE_IOCTL_REQ failed, slot=%d state=%s ret=%d\n",
-               slot, state_name(state), ret);
+        printf("BB_REMOTE_IOCTL_REQ failed, remote_slot=%d state=%s ret=%d\n",
+               remote_slot, state_name(state), ret);
         return ret;
     }
 
-    printf("peer 8030 accepted and published event: slot=%d state=%s data=0x%02x\n",
-           slot, state_name(state), state);
+    printf("peer 8030 accepted and published event: remote_slot=%d state=%s data=0x%02x\n",
+           remote_slot, state_name(state), state);
     return 0;
 }
 
@@ -204,14 +204,15 @@ int main(int argc, char **argv)
     const char *addr = "127.0.0.1";
     int port = BB_PORT_DEFAULT;
     int dev_index = 0;
-    int slot = 0;
+    int remote_slot = BB_SLOT_0;
+    int remote_seen = 0;
     int opt;
     int ret;
     run_mode_t mode = RUN_MODE_NONE;
     uint8_t send_state = DEMO_STATE_DISARMED;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:rt:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:R::rt:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -229,11 +230,28 @@ int main(int argc, char **argv)
                 return -1;
             }
             break;
-        case 's':
-            if (parse_int_range(optarg, 0, BB_SLOT_MAX - 1, "slot", &slot)) {
+        case 'R': {
+            const char *slot_text = optarg;
+
+            if (remote_seen) {
+                printf("-R may only be specified once\n");
+                return -1;
+            }
+            remote_seen = 1;
+            remote_slot = BB_SLOT_0;
+            if (!slot_text && optind < argc && argv[optind][0] != '-') {
+                slot_text = argv[optind++];
+            }
+            if (slot_text &&
+                parse_int_range(slot_text,
+                                BB_SLOT_0,
+                                BB_SLOT_MAX - 1,
+                                "remote slot",
+                                &remote_slot)) {
                 return -1;
             }
             break;
+        }
         case 'r':
             if (mode != RUN_MODE_NONE) {
                 printf("receive and send modes are mutually exclusive\n");
@@ -262,6 +280,11 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    if (mode == RUN_MODE_RECEIVE && remote_seen) {
+        printf("-R is only valid in send mode\n");
+        return -1;
+    }
+
     signal(SIGINT, stop_signal_handler);
     signal(SIGTERM, stop_signal_handler);
 
@@ -273,7 +296,7 @@ int main(int argc, char **argv)
     if (mode == RUN_MODE_RECEIVE) {
         ret = receive_events(ctx.handle);
     } else {
-        ret = send_event(ctx.handle, slot, send_state);
+        ret = send_event(ctx.handle, remote_slot, send_state);
     }
 
     bb_demo_close(&ctx);

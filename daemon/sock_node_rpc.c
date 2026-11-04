@@ -13,7 +13,7 @@
 
 #define TX_DATA_CHECK 0
 #define SOCK_OPEN_BASE_LEN 12
-#define SOCK_OPEN_ENCRYPT_LEN 45
+#define SOCK_OPEN_ENCRYPT_LEN (SOCK_OPEN_BASE_LEN + 1 + BB_SOCK_ENCRYPT_KEY_LEN)
 
 int find_socket(struct basenode* pnod, void* par)
 {
@@ -262,7 +262,7 @@ static int rpc_socket_read_proc(struct rpc_node* rpc, usbpack* pack)
         uint32_t rx_buff_len;
         uint32_t tx_buff_len;
         uint8_t  encrypt_mode = BB_SOCK_ENCRYPT_MODE_DEFAULT;
-        uint8_t  key[32]      = {0};
+        uint8_t  key[BB_SOCK_ENCRYPT_KEY_LEN] = {0};
 
         if (pack->datalen != SOCK_OPEN_BASE_LEN && pack->datalen != SOCK_OPEN_ENCRYPT_LEN) {
             com_log(COM_SOCKET_COM, "reject socket open: invalid payload length %d", pack->datalen);

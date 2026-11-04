@@ -137,6 +137,7 @@ extern "C" {
 #define BB_GET_DEV_CONNECT_SLOT             BB_REQUEST(BB_REQ_GET, 118) /**<@note 获取dev当前connect的slot*/
 #define BB_GET_MCS_MODE                     BB_REQUEST(BB_REQ_GET, 119) /**<@note 读取指定SLOT的MCS模式*/
 #define BB_GET_BANDWIDTH_MODE               BB_REQUEST(BB_REQ_GET, 120) /**<@note 读取指定SLOT的频宽控制模式*/
+#define BB_GET_SOCKET_ENCRYPT               BB_REQUEST(BB_REQ_GET, 121) /**<@note 读取指定socket port的加密配置*/
 
 #define BB_GET_PRJ_DISPATCH                 BB_REQUEST(BB_REQ_GET, 200) /**<@note 二级GET命令分发*/
 
@@ -648,6 +649,8 @@ typedef enum {
     BB_SOCK_ENCRYPT_MODE_MAX,
 } bb_sock_encrypt_mode_t;
 
+#define BB_SOCK_ENCRYPT_KEY_LEN 32
+
 /**定义数传socket创建时的自定义参数*/
 typedef struct bb_sock_opt_t {
     uint32_t tx_buf_size;                                       /**<@attention 用于指定发送buffer的大小，创建的socket具备TX属性时有效*/
@@ -655,14 +658,14 @@ typedef struct bb_sock_opt_t {
     void*    tx_buf;                                            /**<@attention 仅芯片侧有效 由8030侧应用指定tx buffer的内存地址 20250205*/
     void*    rx_buf;                                            /**<@attention 仅芯片侧有效 由8030侧应用指定rx buffer的内存地址 20250205*/
     uint8_t  encrypt_mode;                                      /**<@attention 创建加密通道时指定加密模式，类型为bb_sock_encrypt_mode_t*/
-    uint8_t  key[32];                                           /**<@attention 创建加密通道时指定密钥*/
+    uint8_t  key[BB_SOCK_ENCRYPT_KEY_LEN];                      /**<@attention 创建加密通道时指定密钥*/
 } bb_sock_opt_t;
 
 /**定义数传socket更新加密参数的自定义参数*/
 typedef struct bb_sock_upd_enc_s {
     uint8_t  encrypt_en;                                        /**<@attention 更新加密通道是否使能加密模式*/
     uint8_t  encrypt_mode;                                      /**<@attention 更新加密通道指定加密模式，类型为bb_sock_encrypt_mode_t*/
-    uint8_t  key[32];                                           /**<@attention 更新加密通道指定密钥*/
+    uint8_t  key[BB_SOCK_ENCRYPT_KEY_LEN];                      /**<@attention 更新加密通道指定密钥*/
 } bb_sock_upd_enc_t;
 
 /**定义基本内存块*/
@@ -1887,6 +1890,18 @@ typedef struct {
     uint8_t port;                                               /**<@note 设置的目标port*/
     bb_sock_upd_enc_t sock_upd_enc;                             /**<@note 设置的目标加密配置*/
 } bb_set_force_upd_socket_enc_t;
+
+/**定义读取命令BB_GET_SOCKET_ENCRYPT的输入参数结构*/
+typedef struct {
+    uint8_t slot;                                               /**<@note 查询的目标slot*/
+    uint8_t port;                                               /**<@note 查询的目标port*/
+} bb_get_socket_enc_in_t;
+
+/**定义读取命令BB_GET_SOCKET_ENCRYPT的输出参数结构*/
+typedef struct {
+    uint8_t encrypt_en;                                         /**<@note socket是否启用加密*/
+    uint8_t encrypt_mode;                                       /**<@note socket加密模式，类型为bb_sock_encrypt_mode_t*/
+} bb_get_socket_enc_out_t;
 
 /** @} */  /** <!-- ==== Structure Definition end ==== */
 

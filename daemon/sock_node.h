@@ -7,6 +7,7 @@
 extern "C" {
 #endif
 #include "base_node.h"
+#include "bb_api.h"
 #include "com_cfg.h"
 #include "list.h"
 #include "ringbuffer.h"
@@ -52,7 +53,7 @@ typedef struct sock_dev {
     uint32_t rx_buff_len;
     uint32_t tx_buff_len;
     uint8_t  encrypt_mode;
-    uint8_t  key[32];
+    uint8_t  key[BB_SOCK_ENCRYPT_KEY_LEN];
     int      slot;
     int      port;
 

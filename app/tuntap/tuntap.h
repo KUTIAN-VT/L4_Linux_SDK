@@ -21,6 +21,9 @@ struct bb_tun_cfg {
     int              dev_index = 0;
     int              daemon_port = BB_PORT_DEFAULT;
     char             addr[128] = { 0 };
+    int              encrypt_enabled = 0;
+    bb_sock_encrypt_mode_t encrypt_mode = BB_SOCK_ENCRYPT_MODE_DEFAULT;
+    uint8_t          encrypt_key[BB_SOCK_ENCRYPT_KEY_LEN] = { 0 };
     // tun field
     int  ipset_flg    = 0;
     int  mtu          = 4000;
@@ -31,7 +34,6 @@ struct bb_tun_cfg {
     std::unique_ptr<tuntap::tap> dev;
     // common
     int debugflg = 0;
-    int force_close_on_open_fail = 0;
     int buff_max = 4096;
     uint32_t rx_buf_len = 40000;
     uint32_t tx_buf_len = 60000;
@@ -42,6 +44,11 @@ struct bb_tun_cfg {
         strcpy(devname, "tap0");
         ip[0] = '\0';
         strcpy(mask, "255.255.255.0");
+    }
+
+    ~bb_tun_cfg()
+    {
+        memset(encrypt_key, 0, sizeof(encrypt_key));
     }
 };
 

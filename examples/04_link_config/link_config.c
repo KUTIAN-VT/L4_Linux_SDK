@@ -19,11 +19,11 @@ static void usage(const char *prog)
     printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
-    printf("  -s <slot>       slot id, default: 0; remote slot id for -R\n");
+    printf("  -s <slot>       command target slot, default: 0; DEV uses slot 0 as AP\n");
     printf("  -u <user>       physical user id for -P, default: AP=%d, DEV=%d\n",
            BB_USER_BR_CS,
            BB_USER_0);
-    printf("  -R              set peer device by remote ioctl through -s <slot>\n");
+    printf("  -R [slot]       set peer device by remote ioctl, default remote slot: 0\n");
     printf("  -B <0|1>        set BB_SET_BAND_MODE, 1=auto, 0=manual\n");
     printf("  -b <band>       set BB_SET_BAND, band: 1g/2g/5g or 0/1/2\n");
     printf("  -C <0|1>        set BB_SET_CHAN_MODE, 1=auto, 0=manual\n");
@@ -635,7 +635,7 @@ int main(int argc, char **argv)
     int power_auto = 0;
     int power = 0;
     int frame_change_mode = 0;
-    int remote = 0;
+    int remote_slot = -1;
     int power_user_specified = 0;
     int do_chan_mode = 0;
     int do_chan = 0;
@@ -653,7 +653,7 @@ int main(int argc, char **argv)
     int ret = 0;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:u:RC:c:d:B:b:W:w:M:m:O:P:F:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:u:R::C:c:d:B:b:W:w:M:m:O:P:F:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -682,9 +682,23 @@ int main(int argc, char **argv)
             }
             power_user_specified = 1;
             break;
-        case 'R':
-            remote = 1;
+        case 'R': {
+            const char *slot_text = optarg;
+
+            if (remote_slot >= 0) {
+                printf("-R may only be specified once\n");
+                return -1;
+            }
+            remote_slot = BB_SLOT_0;
+            if (!slot_text && optind < argc && argv[optind][0] != '-') {
+                slot_text = argv[optind++];
+            }
+            if (slot_text &&
+                parse_int_range(slot_text, 0, BB_SLOT_MAX - 1, "remote slot", &remote_slot)) {
+                return -1;
+            }
             break;
+        }
         case 'C':
             if (parse_auto_mode(optarg, "chan auto_mode", &chan_mode)) {
                 return -1;
@@ -770,6 +784,11 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    if (optind < argc) {
+        printf("unexpected argument: %s\n", argv[optind]);
+        return -1;
+    }
+
     ret = bb_demo_open(&ctx, addr, port, dev_index);
     if (ret) {
         return -1;
@@ -777,7 +796,7 @@ int main(int argc, char **argv)
 
     if (do_band_mode) {
         delay_before_config_cmd(executed_count);
-        ret = set_band_mode(ctx.handle, band_mode, remote ? slot : -1);
+        ret = set_band_mode(ctx.handle, band_mode, remote_slot);
         if (ret) {
             goto done;
         }
@@ -786,7 +805,7 @@ int main(int argc, char **argv)
 
     if (do_band) {
         delay_before_config_cmd(executed_count);
-        ret = set_band(ctx.handle, target_band, remote ? slot : -1);
+        ret = set_band(ctx.handle, target_band, remote_slot);
         if (ret) {
             goto done;
         }
@@ -795,7 +814,7 @@ int main(int argc, char **argv)
 
     if (do_chan_mode) {
         delay_before_config_cmd(executed_count);
-        ret = set_chan_mode(ctx.handle, chan_mode, remote ? slot : -1);
+        ret = set_chan_mode(ctx.handle, chan_mode, remote_slot);
         if (ret) {
             goto done;
         }
@@ -804,7 +823,7 @@ int main(int argc, char **argv)
 
     if (do_chan) {
         delay_before_config_cmd(executed_count);
-        ret = set_chan(ctx.handle, chan_dir, chan_index, remote ? slot : -1);
+        ret = set_chan(ctx.handle, chan_dir, chan_index, remote_slot);
         if (ret) {
             goto done;
         }
@@ -813,7 +832,7 @@ int main(int argc, char **argv)
 
     if (do_bandwidth_mode) {
         delay_before_config_cmd(executed_count);
-        ret = set_bandwidth_mode(ctx.handle, slot, bandwidth_mode, remote ? slot : -1);
+        ret = set_bandwidth_mode(ctx.handle, slot, bandwidth_mode, remote_slot);
         if (ret) {
             goto done;
         }
@@ -822,7 +841,7 @@ int main(int argc, char **argv)
 
     if (do_bandwidth) {
         delay_before_config_cmd(executed_count);
-        ret = set_bandwidth(ctx.handle, slot, chan_dir, bandwidth, remote ? slot : -1);
+        ret = set_bandwidth(ctx.handle, slot, chan_dir, bandwidth, remote_slot);
         if (ret) {
             goto done;
         }
@@ -831,7 +850,7 @@ int main(int argc, char **argv)
 
     if (do_mcs_mode) {
         delay_before_config_cmd(executed_count);
-        ret = set_mcs_mode(ctx.handle, slot, mcs_mode, remote ? slot : -1);
+        ret = set_mcs_mode(ctx.handle, slot, mcs_mode, remote_slot);
         if (ret) {
             goto done;
         }
@@ -840,7 +859,7 @@ int main(int argc, char **argv)
 
     if (do_mcs) {
         delay_before_config_cmd(executed_count);
-        ret = set_mcs(ctx.handle, slot, mcs, remote ? slot : -1);
+        ret = set_mcs(ctx.handle, slot, mcs, remote_slot);
         if (ret) {
             goto done;
         }
@@ -849,7 +868,7 @@ int main(int argc, char **argv)
 
     if (do_power_auto) {
         delay_before_config_cmd(executed_count);
-        ret = set_power_auto(ctx.handle, power_auto, remote ? slot : -1);
+        ret = set_power_auto(ctx.handle, power_auto, remote_slot);
         if (ret) {
             goto done;
         }
@@ -858,14 +877,14 @@ int main(int argc, char **argv)
 
     if (do_power) {
         if (!power_user_specified) {
-            ret = resolve_power_user(ctx.handle, remote ? slot : -1, &power_user);
+            ret = resolve_power_user(ctx.handle, remote_slot, &power_user);
             if (ret) {
                 goto done;
             }
         }
 
         delay_before_config_cmd(executed_count);
-        ret = set_power(ctx.handle, power_user, power, remote ? slot : -1);
+        ret = set_power(ctx.handle, power_user, power, remote_slot);
         if (ret) {
             goto done;
         }
@@ -874,7 +893,7 @@ int main(int argc, char **argv)
 
     if (do_frame_change) {
         delay_before_config_cmd(executed_count);
-        ret = set_frame_change(ctx.handle, frame_change_mode, remote ? slot : -1);
+        ret = set_frame_change(ctx.handle, frame_change_mode, remote_slot);
         if (ret) {
             goto done;
         }

@@ -237,7 +237,7 @@ AR8030_API int bb_socket_open(bb_dev_handle_t* pdev, bb_slot_e slot, uint32_t po
 
     // 启动创建socket
     uint8_t       size = 0;
-    uint8_t       buff[45] = {0};
+    uint8_t       buff[12 + 1 + BB_SOCK_ENCRYPT_KEY_LEN] = {0};
     uint32_t      req = 4 << 24 | so_open << 16 | slot << 8 | port << 0;
     bb_sock_opt_t tmpopt = {0};
     tmpopt.rx_buf_size = BB_CONFIG_MAC_RX_BUF_SIZE;

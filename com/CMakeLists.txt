@@ -24,3 +24,4 @@ endif()
 
 install(FILES bb_api.h DESTINATION include)
 install(FILES bb_config.h DESTINATION include)
+install(FILES prj_rpc.h DESTINATION include)

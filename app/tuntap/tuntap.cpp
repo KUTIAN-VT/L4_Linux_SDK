@@ -2,6 +2,7 @@
 
 #include "com_log.h"
 #include "tuntap.h"
+#include <ctype.h>
 #include <getopt.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -26,25 +27,159 @@ int usage(void)
     printf("  -u, --user <user>      baseband user id, default: 0\n");
     printf("  -d, --dev <name>       TAP device name, default: tap0\n");
     printf("  -v, --debug            debug mode in ethernet transfer\n");
-    printf("  -k, --force-close-on-open-fail\n");
-    printf("                         force close BB socket and retry once if open fails\n");
+    printf("  -e, --encrypt-mode <mode>  enable encryption: default, aes128 or aes256\n");
+    printf("  -k, --encrypt-key <hex>    AES key: 32 hex digits for AES128, 64 for AES256\n");
     printf("  -r, --rx-buf <bytes>   rx buffer length, default: 40000\n");
     printf("  -t, --tx-buf <bytes>   tx buffer length, default: 60000\n");
 
     return 0;
 }
 
+static const char* encrypt_mode_name(bb_sock_encrypt_mode_t mode)
+{
+    switch (mode) {
+    case BB_SOCK_ENCRYPT_MODE_DEFAULT:
+        return "default";
+    case BB_SOCK_ENCRYPT_MODE_AES128:
+        return "aes128";
+    case BB_SOCK_ENCRYPT_MODE_AES256:
+        return "aes256";
+    default:
+        return "unknown";
+    }
+}
+
 static void print_tuntap_cfg(const bb_tun_cfg& cfg)
 {
-    printf("l4_tuntap args: -u %d -P %d -I %s -d %s -r %u -t %u -k %d\n",
+    const char* encryption = cfg.encrypt_enabled ? encrypt_mode_name(cfg.encrypt_mode) : "disabled";
+
+    printf("l4_tuntap args: -u %d -P %d -I %s -d %s -r %u -t %u encryption=%s\n",
            (int)cfg.slot_id,
            cfg.port_id,
            cfg.ip,
            cfg.devname,
            (unsigned int)cfg.rx_buf_len,
            (unsigned int)cfg.tx_buf_len,
-           cfg.force_close_on_open_fail);
+           encryption);
     fflush(stdout);
+}
+
+static int parse_encrypt_mode(const char* text, bb_sock_encrypt_mode_t& mode)
+{
+    if (strcmp(text, "default") == 0) {
+        mode = BB_SOCK_ENCRYPT_MODE_DEFAULT;
+    } else if (strcmp(text, "aes128") == 0) {
+        mode = BB_SOCK_ENCRYPT_MODE_AES128;
+    } else if (strcmp(text, "aes256") == 0) {
+        mode = BB_SOCK_ENCRYPT_MODE_AES256;
+    } else {
+        printf("invalid encryption mode: %s; use default, aes128 or aes256\n", text);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int is_hex_separator(char c)
+{
+    return isspace((unsigned char)c) || c == ':' || c == ',';
+}
+
+static int hex_value(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+static int parse_hex_key(const char* text, uint8_t* key, size_t expected_len)
+{
+    const char* p = text;
+    size_t len = 0;
+
+    while (*p) {
+        int hi;
+        int lo;
+
+        while (is_hex_separator(*p)) {
+            ++p;
+        }
+        if (*p == '\0') {
+            break;
+        }
+
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+            p += 2;
+        }
+
+        hi = hex_value(*p);
+        if (hi < 0) {
+            printf("invalid encryption key hex character: %c\n", *p ? *p : '?');
+            return -1;
+        }
+        ++p;
+
+        lo = hex_value(*p);
+        if (lo < 0) {
+            printf("encryption key must use two hex digits per byte\n");
+            return -1;
+        }
+        ++p;
+
+        if (len >= expected_len) {
+            printf("encryption key is longer than %zu bytes\n", expected_len);
+            return -1;
+        }
+        key[len++] = (uint8_t)((hi << 4) | lo);
+    }
+
+    if (len != expected_len) {
+        printf("invalid encryption key length: got %zu bytes, expected %zu\n", len, expected_len);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int validate_encrypt_options(bb_tun_cfg& cfg, const char* key_text)
+{
+    size_t expected_len;
+    int ret;
+
+    if (!cfg.encrypt_enabled) {
+        if (key_text) {
+            printf("-k/--encrypt-key requires -e/--encrypt-mode\n");
+            return -1;
+        }
+        return 0;
+    }
+
+    if (cfg.encrypt_mode == BB_SOCK_ENCRYPT_MODE_DEFAULT) {
+        if (key_text) {
+            printf("default encryption mode does not use -k/--encrypt-key\n");
+            return -1;
+        }
+        return 0;
+    }
+
+    if (!key_text) {
+        printf("%s requires -k/--encrypt-key\n", encrypt_mode_name(cfg.encrypt_mode));
+        return -1;
+    }
+
+    expected_len = cfg.encrypt_mode == BB_SOCK_ENCRYPT_MODE_AES128 ? 16 : BB_SOCK_ENCRYPT_KEY_LEN;
+    ret = parse_hex_key(key_text, cfg.encrypt_key, expected_len);
+    if (ret) {
+        memset(cfg.encrypt_key, 0, sizeof(cfg.encrypt_key));
+    }
+    return ret;
 }
 
 #define BBCOM_SESSION_DATA_HEADER_SIZE      15
@@ -174,22 +309,27 @@ static void print_target_device(const bb_dev_info_t& info)
 static int open_bb_socket(bb_tun_cfg& cfg, bb_dev_handle_t* pdev)
 {
     bb_sock_opt_t opt = {0};
+    uint32_t flags = BB_SOCK_FLAG_RX | BB_SOCK_FLAG_TX;
+
     opt.rx_buf_size = cfg.rx_buf_len;
     opt.tx_buf_size = cfg.tx_buf_len;
+    if (cfg.encrypt_enabled) {
+        flags |= BB_SOCK_FLAG_ENCRYPT;
+        opt.encrypt_mode = (uint8_t)cfg.encrypt_mode;
+        memcpy(opt.key, cfg.encrypt_key, sizeof(opt.key));
+    }
 
     int fd = bb_socket_open(pdev,
                             cfg.slot_id,
                             cfg.port_id,
-                            BB_SOCK_FLAG_RX | BB_SOCK_FLAG_TX,
+                            flags,
                             &opt);
+    memset(opt.key, 0, sizeof(opt.key));
     if (fd >= 0) {
         return fd;
     }
 
     printf("create bb socket failed\n");
-    if (!cfg.force_close_on_open_fail) {
-        return -1;
-    }
 
     bb_force_close_socket_t force_close = {0};
     force_close.slot = (uint8_t)cfg.slot_id;
@@ -203,12 +343,16 @@ static int open_bb_socket(bb_tun_cfg& cfg, bb_dev_handle_t* pdev)
         return -1;
     }
 
+    if (cfg.encrypt_enabled) {
+        memcpy(opt.key, cfg.encrypt_key, sizeof(opt.key));
+    }
     usleep(200 * 1000);
     fd = bb_socket_open(pdev,
                         cfg.slot_id,
                         cfg.port_id,
-                        BB_SOCK_FLAG_RX | BB_SOCK_FLAG_TX,
+                        flags,
                         &opt);
+    memset(opt.key, 0, sizeof(opt.key));
     if (fd < 0) {
         printf("retry create bb socket failed\n");
         return -1;
@@ -706,7 +850,8 @@ int main(int argc, char* argv[])
 {
     int         opt           = 0;
     int         flag_help     = 0;
-    const char* short_options = "ha:p:i:P:I:u:d:vkr:t:";
+    const char* short_options = ":ha:p:i:P:I:u:d:ve:k:r:t:";
+    const char* encrypt_key_text = NULL;
 
     bb_tun_cfg    cfg;
     struct option long_options[] = {
@@ -719,7 +864,8 @@ int main(int argc, char* argv[])
         { "user",      required_argument, NULL, 'u'},
         { "dev",   required_argument, NULL, 'd'},
         { "debug", no_argument,       NULL, 'v'},
-        { "force-close-on-open-fail", no_argument, NULL, 'k'},
+        { "encrypt-mode", required_argument, NULL, 'e'},
+        { "encrypt-key",  required_argument, NULL, 'k'},
         { "rx-buf",    required_argument, NULL, 'r'},
         { "tx-buf",    required_argument, NULL, 't'},
         { 0,       0,                 0,    0  },
@@ -756,9 +902,14 @@ int main(int argc, char* argv[])
             printf("Set cfg.debugflg = 1 \n");
             cfg.debugflg = 1;
             break;
+        case 'e':
+            if (parse_encrypt_mode(optarg, cfg.encrypt_mode)) {
+                return -1;
+            }
+            cfg.encrypt_enabled = 1;
+            break;
         case 'k':
-            printf("Set cfg.force_close_on_open_fail = 1 \n");
-            cfg.force_close_on_open_fail = 1;
+            encrypt_key_text = optarg;
             break;
         case 'r':
             cfg.rx_buf_len = strtoul(optarg, NULL, 10);
@@ -766,9 +917,13 @@ int main(int argc, char* argv[])
         case 't':
             cfg.tx_buf_len = strtoul(optarg, NULL, 10);
             break;
+        case ':':
+            printf("missing argument for -%c\n", optopt);
+            return -1;
+        case '?':
         default:
             printf("unknown option\n");
-            break;
+            return -1;
         }
     }
 
@@ -781,6 +936,10 @@ int main(int argc, char* argv[])
 
     if (flag_help) {
         return usage();
+    }
+
+    if (validate_encrypt_options(cfg, encrypt_key_text)) {
+        return -1;
     }
 
     if (!cfg.ipset_flg) {

@@ -35,7 +35,7 @@ PACK(typedef struct ar_netif_s
     unsigned long rx_buf_size;                      /** <@note Rx buffer of the socket, for [CREATE/RESIZE/GET] */
     unsigned char encrypt_en;                       /** <@note socket encrypt enable, for [CREATE/ENC_UPDATE/GET] */
     unsigned char encrypt_mode;                     /** <@note socket encrypt mode, refers to bb_sock_encrypt_mode_t, for [CREATE/ENC_UPDATE/GET] */
-    unsigned char key[32];                          /** <@note socket encrypt key, for [CREATE/ENC_UPDATE/GET] */
+    unsigned char key[BB_SOCK_ENCRYPT_KEY_LEN]; /** <@note socket encrypt key, for [CREATE/ENC_UPDATE/GET] */
 }) ar_netif_t;
 
 /** 网络设备驱动板本号(linux) */

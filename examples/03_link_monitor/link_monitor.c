@@ -138,7 +138,10 @@ typedef struct {
     const bb_phy_status_t *phy;
 } user_phy_view_t;
 
-static int get_user_phy_view(const bb_get_status_out_t *status, int tx, user_phy_view_t *view)
+static int get_user_phy_view(const bb_get_status_out_t *status,
+                             int tx,
+                             int dev_tx_user,
+                             user_phy_view_t *view)
 {
     switch (status->role) {
     case BB_ROLE_AP:
@@ -146,7 +149,7 @@ static int get_user_phy_view(const bb_get_status_out_t *status, int tx, user_phy
         view->source = tx ? "tx" : "rx";
         break;
     case BB_ROLE_DEV:
-        view->user = tx ? BB_USER_0 : BB_USER_BR_CS;
+        view->user = tx ? dev_tx_user : BB_USER_BR_CS;
         view->source = tx ? "tx" : "rx";
         break;
     default:
@@ -192,7 +195,7 @@ static void print_user_phy_view(const char *dir, const user_phy_view_t *view, in
            phy->tintlv_num);
 }
 
-static void print_user_phy_status(const bb_get_status_out_t *status)
+static void print_user_phy_status(const bb_get_status_out_t *status, int dev_tx_user)
 {
     user_phy_view_t rx_view;
     user_phy_view_t tx_view;
@@ -200,7 +203,8 @@ static void print_user_phy_status(const bb_get_status_out_t *status)
     const char *major_dir;
 
     printf("\nuser phy status:\n");
-    if (get_user_phy_view(status, 0, &rx_view) || get_user_phy_view(status, 1, &tx_view)) {
+    if (get_user_phy_view(status, 0, dev_tx_user, &rx_view) ||
+        get_user_phy_view(status, 1, dev_tx_user, &tx_view)) {
         printf("  unavailable: unsupported role=%u\n", status->role);
         return;
     }
@@ -268,7 +272,7 @@ static void usage(const char *prog)
     printf("  -a <addr>       daemon address, default: 127.0.0.1\n");
     printf("  -p <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i <index>      device index, default: 0\n");
-    printf("  -s <slot>       slot id, default: 0; DEV uses slot 0 as AP\n");
+    printf("  -s <slot>       command target slot, default: 0; DEV -T auto-detects if omitted\n");
     printf("  -u <user>       physical user id; -Q default: AP=0, DEV=8; -P default: AP=8, DEV=0\n");
     printf("  -A              query all link information, default action\n");
     printf("  -S              query BB_GET_STATUS\n");
@@ -279,11 +283,25 @@ static void usage(const char *prog)
     printf("  -W              query BB_GET_BANDWIDTH_MODE\n");
     printf("  -P              query BB_GET_CUR_POWER\n");
     printf("  -C              query BB_GET_CHAN_INFO\n");
-    printf("  -R              query peer device by remote ioctl through -s <slot>\n");
+    printf("  -R [slot]       query peer device by remote ioctl, default remote slot: 0\n");
     printf("  -B              query BB_GET_BAND_INFO\n");
-    printf("  -T              query BB_GET_THROUGHPUT for TX and RX\n");
+    printf("  -T              query BB_GET_THROUGHPUT for TX and RX; -s overrides DEV auto slot\n");
     printf("  -D              query BB_GET_DISTC_RESULT\n");
     printf("  -V              query BB_GET_1V1_INFO\n");
+}
+
+static int parse_slot(const char *text, const char *name, int *out)
+{
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+
+    if (end == text || *end != '\0' || value < 0 || value >= BB_SLOT_MAX) {
+        printf("invalid %s: %s, valid range: 0-%d\n", name, text, BB_SLOT_MAX - 1);
+        return -1;
+    }
+
+    *out = (int)value;
+    return 0;
 }
 
 static int link_monitor_ioctl(bb_dev_handle_t *handle,
@@ -372,7 +390,44 @@ static int read_status(bb_dev_handle_t *handle, bb_get_status_out_t *status, int
     return 0;
 }
 
-static void print_status(const bb_get_status_out_t *status, int remote_slot)
+static int read_dev_connect_slot(bb_dev_handle_t *handle, int remote_slot, int *slot)
+{
+    bb_get_dev_connect_slot_out_t output;
+    int ret;
+
+    memset(&output, 0, sizeof(output));
+    ret = link_monitor_ioctl(handle,
+                             BB_GET_DEV_CONNECT_SLOT,
+                             NULL,
+                             0,
+                             &output,
+                             sizeof(output),
+                             remote_slot);
+    if (ret) {
+        if (remote_slot >= 0) {
+            printf("BB_GET_DEV_CONNECT_SLOT remote slot=%d failed, ret=%d\n", remote_slot, ret);
+        } else {
+            printf("BB_GET_DEV_CONNECT_SLOT failed, ret=%d\n", ret);
+        }
+        return ret;
+    }
+
+    if (output.slot >= BB_SLOT_MAX || output.slot >= BB_DATA_USER_MAX) {
+        if (remote_slot >= 0) {
+            printf("BB_GET_DEV_CONNECT_SLOT remote slot=%d returned invalid slot=%u\n",
+                   remote_slot,
+                   output.slot);
+        } else {
+            printf("BB_GET_DEV_CONNECT_SLOT returned invalid slot=%u\n", output.slot);
+        }
+        return -1;
+    }
+
+    *slot = output.slot;
+    return 0;
+}
+
+static void print_status(const bb_get_status_out_t *status, int remote_slot, int dev_tx_user)
 {
     print_query_title("BB_GET_STATUS", remote_slot);
     printf("role        : %s (%u)\n", role_name(status->role), status->role);
@@ -405,12 +460,13 @@ static void print_status(const bb_get_status_out_t *status, int remote_slot)
         printf("\n");
     }
 
-    print_user_phy_status(status);
+    print_user_phy_status(status, dev_tx_user);
 }
 
 static int query_status(bb_dev_handle_t *handle, int remote_slot)
 {
     bb_get_status_out_t status;
+    int dev_tx_user = BB_USER_0;
     int ret;
 
     ret = read_status(handle, &status, remote_slot);
@@ -418,7 +474,14 @@ static int query_status(bb_dev_handle_t *handle, int remote_slot)
         return ret;
     }
 
-    print_status(&status, remote_slot);
+    if (status.role == BB_ROLE_DEV) {
+        ret = read_dev_connect_slot(handle, remote_slot, &dev_tx_user);
+        if (ret) {
+            return ret;
+        }
+    }
+
+    print_status(&status, remote_slot, dev_tx_user);
     return 0;
 }
 
@@ -751,6 +814,20 @@ static int query_band_info(bb_dev_handle_t *handle, int remote_slot)
     return 0;
 }
 
+static int query_dev_connect_slot(bb_dev_handle_t *handle, int remote_slot, int *slot)
+{
+    int ret;
+
+    ret = read_dev_connect_slot(handle, remote_slot, slot);
+    if (ret) {
+        return ret;
+    }
+
+    print_query_title("BB_GET_DEV_CONNECT_SLOT", remote_slot);
+    printf("slot=%d\n", *slot);
+    return 0;
+}
+
 static int query_throughput(bb_dev_handle_t *handle, int slot, int remote_slot)
 {
     bb_get_throughput_in_t input;
@@ -863,6 +940,7 @@ int main(int argc, char **argv)
     int port = BB_PORT_DEFAULT;
     int dev_index = 0;
     int slot = 0;
+    int slot_specified = 0;
     int user = 0;
     int user_specified = 0;
     int do_status = 0;
@@ -877,15 +955,16 @@ int main(int argc, char **argv)
     int do_throughput = 0;
     int do_distc_result = 0;
     int do_1v1_info = 0;
-    int remote = 0;
+    int remote_slot = -1;
     int opt;
     int ret = 0;
     int need_link_detail;
     int link_ready = 1;
+    int dev_tx_user = BB_USER_0;
     bb_demo_context_t ctx;
     bb_get_status_out_t status;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMmWPCBTDVR")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:s:u:ASQqMmWPCBTDVR::")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -901,6 +980,7 @@ int main(int argc, char **argv)
             break;
         case 's':
             slot = (int)strtol(optarg, NULL, 10);
+            slot_specified = 1;
             break;
         case 'u':
             user = (int)strtol(optarg, NULL, 10);
@@ -944,9 +1024,22 @@ int main(int argc, char **argv)
         case 'C':
             do_chan = 1;
             break;
-        case 'R':
-            remote = 1;
+        case 'R': {
+            const char *slot_text = optarg;
+
+            if (remote_slot >= 0) {
+                printf("-R may only be specified once\n");
+                return -1;
+            }
+            remote_slot = BB_SLOT_0;
+            if (!slot_text && optind < argc && argv[optind][0] != '-') {
+                slot_text = argv[optind++];
+            }
+            if (slot_text && parse_slot(slot_text, "remote slot", &remote_slot)) {
+                return -1;
+            }
             break;
+        }
         case 'B':
             do_band = 1;
             break;
@@ -992,6 +1085,11 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    if (optind < argc) {
+        printf("unexpected argument: %s\n", argv[optind]);
+        return -1;
+    }
+
     ret = bb_demo_open(&ctx, addr, port, dev_index);
     if (ret) {
         return -1;
@@ -1000,59 +1098,76 @@ int main(int argc, char **argv)
     need_link_detail = do_user_quality || do_peer_quality || do_mcs || do_power ||
                        do_throughput || do_distc_result;
     if (do_status || need_link_detail) {
-        ret = read_status(ctx.handle, &status, remote ? slot : -1);
+        ret = read_status(ctx.handle, &status, remote_slot);
         if (ret) {
             goto done;
         }
 
         if (do_status) {
-            print_status(&status, remote ? slot : -1);
+            if (status.role == BB_ROLE_DEV) {
+                ret = read_dev_connect_slot(ctx.handle, remote_slot, &dev_tx_user);
+                if (ret) {
+                    goto done;
+                }
+            }
+            print_status(&status, remote_slot, dev_tx_user);
         }
 
         if (need_link_detail) {
+            int need_link_ready = do_user_quality || do_peer_quality || do_mcs || do_power ||
+                                  do_distc_result ||
+                                  (do_throughput && status.role != BB_ROLE_DEV);
+
             link_ready = link_ready_for_slot(&status, slot);
-            if (!link_ready) {
+            if (need_link_ready && !link_ready) {
                 if (!do_status) {
-                    print_status(&status, remote ? slot : -1);
+                    if (status.role == BB_ROLE_DEV) {
+                        ret = read_dev_connect_slot(ctx.handle, remote_slot, &dev_tx_user);
+                        if (ret) {
+                            goto done;
+                        }
+                    }
+                    print_status(&status, remote_slot, dev_tx_user);
                 }
 
-                printf("\nslot[%d] is not paired/connected, skip link detail queries\n", slot);
-                printf("link detail APIs require pair_state=1 or state=CONNECT\n");
+                printf("\nslot[%d] is not paired/connected, skip queries that require link readiness\n",
+                       slot);
+                printf("these APIs require pair_state=1 or state=CONNECT\n");
             }
         }
     }
 
     if (do_user_quality && link_ready) {
         int quality_user = user_specified ? user : default_quality_user_for_role(status.role);
-        ret = query_user_quality(ctx.handle, quality_user, remote ? slot : -1);
+        ret = query_user_quality(ctx.handle, quality_user, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_peer_quality && link_ready) {
-        ret = query_peer_quality(ctx.handle, slot, remote ? slot : -1);
+        ret = query_peer_quality(ctx.handle, slot, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_mcs && link_ready) {
-        ret = query_mcs(ctx.handle, slot, remote ? slot : -1);
+        ret = query_mcs(ctx.handle, slot, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_mcs_mode) {
-        ret = query_mcs_mode(ctx.handle, slot, remote ? slot : -1);
+        ret = query_mcs_mode(ctx.handle, slot, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_bandwidth_mode) {
-        ret = query_bandwidth_mode(ctx.handle, slot, remote ? slot : -1);
+        ret = query_bandwidth_mode(ctx.handle, slot, remote_slot);
         if (ret) {
             goto done;
         }
@@ -1060,42 +1175,51 @@ int main(int argc, char **argv)
 
     if (do_power && link_ready) {
         int power_user = user_specified ? user : default_power_user_for_role(status.role);
-        ret = query_cur_power(ctx.handle, power_user, remote ? slot : -1);
+        ret = query_cur_power(ctx.handle, power_user, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_chan) {
-        ret = query_chan_info(ctx.handle, remote ? slot : -1);
+        ret = query_chan_info(ctx.handle, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_band) {
-        ret = query_band_info(ctx.handle, remote ? slot : -1);
+        ret = query_band_info(ctx.handle, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
-    if (do_throughput && link_ready) {
-        ret = query_throughput(ctx.handle, slot, remote ? slot : -1);
+    if (do_throughput && (status.role == BB_ROLE_DEV || link_ready)) {
+        int throughput_slot = slot;
+
+        if (status.role == BB_ROLE_DEV && !slot_specified) {
+            ret = query_dev_connect_slot(ctx.handle, remote_slot, &throughput_slot);
+            if (ret) {
+                goto done;
+            }
+        }
+
+        ret = query_throughput(ctx.handle, throughput_slot, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_distc_result && link_ready) {
-        ret = query_distc_result(ctx.handle, slot, remote ? slot : -1);
+        ret = query_distc_result(ctx.handle, slot, remote_slot);
         if (ret) {
             goto done;
         }
     }
 
     if (do_1v1_info) {
-        ret = query_1v1_info(ctx.handle, remote ? slot : -1);
+        ret = query_1v1_info(ctx.handle, remote_slot);
         if (ret) {
             goto done;
         }

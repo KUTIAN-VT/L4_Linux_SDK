@@ -56,8 +56,8 @@ cmake --build build --target l4_project_event
 然后在地面端 Linux 上通过远端 slot 0 发送状态：
 
 ```sh
-./l4_project_event -t armed -s 0
-./l4_project_event -t disarmed -s 0
+./l4_project_event -t armed -R 0
+./l4_project_event -t disarmed -R 0
 ```
 
 ## 一台电脑测试
@@ -81,8 +81,8 @@ cmake --build build --target l4_project_event
 终端 2 从地面端发送事件：
 
 ```sh
-./l4_project_event -t armed -s 0 -i 0
-./l4_project_event -t disarmed -s 0 -i 0
+./l4_project_event -t armed -R 0 -i 0
+./l4_project_event -t disarmed -R 0 -i 0
 ```
 
 

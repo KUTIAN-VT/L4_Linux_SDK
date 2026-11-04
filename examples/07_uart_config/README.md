@@ -24,10 +24,10 @@
 ./l4_uart_config -U 1 -b 9600 -d 8 -P none -T 1 -A
 ```
 
-通过 remote ioctl slot 0 查询 UART 1：
+通过 remote ioctl slot 0 查询对端 UART 1：
 
 ```sh
-./l4_uart_config -s 0 -g 1
+./l4_uart_config -R 0 -g 1
 ```
 
 ## 参数说明
@@ -63,6 +63,6 @@
 
 | 短参数 | 长参数 | 作用 |
 | --- | --- | --- |
-| `-s <slot>` | `--slot <slot>` | 通过 remote ioctl slot 执行命令 |
+| `-R [slot]` | `--remote[=<slot>]` | 通过 remote ioctl 在对端执行，remote slot 默认 `0` |
 
 每次运行只允许一个主动作：`--get-uart` 或 `--set-uart` 二选一。设置动作不会自动查询，设置后如需确认，请再次执行 `--get-uart`。

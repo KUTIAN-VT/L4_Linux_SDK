@@ -43,9 +43,7 @@ typedef struct {
     int dev_index;
     action_t action;
     int reboot;
-    int remote;
     int remote_slot;
-    int remote_slot_set;
     int slot;
     int role;
     int band;
@@ -69,8 +67,8 @@ static void usage(const char *prog)
     printf("  -a, --addr <addr>       daemon address, default: 127.0.0.1\n");
     printf("  -p, --port <port>       daemon port, default: %d\n", BB_PORT_DEFAULT);
     printf("  -i, --index <index>     device index, default: 0\n");
-    printf("      --remote            operate peer device by remote ioctl, default remote slot: 0\n");
-    printf("      --remote-slot <n>   remote slot id for --remote, default: 0\n");
+    printf("  -R [slot], --remote[=<slot>]\n");
+    printf("                           operate peer by remote ioctl, default remote slot: 0\n");
     printf("\n");
     printf("Query actions:\n");
     printf("  -A, --get-all           get role, AP MAC, slot 0 MAC, band, power, power ex and freq list\n");
@@ -85,7 +83,7 @@ static void usage(const char *prog)
     printf("                           get MiniDB UART2 baudrate\n");
     printf("\n");
     printf("Set actions:\n");
-    printf("  -R, --set-role <role>   set role: ap/dev/0/1\n");
+    printf("      --set-role <role>   set role: ap/dev/0/1\n");
     printf("  -M, --set-ap-mac <mac>  set AP MAC\n");
     printf("  -S, --set-slot-mac <mac|slot,mac>\n");
     printf("                           set slot MAC, example: 11:22:33:44 or 1,11:22:33:44\n");
@@ -121,7 +119,7 @@ static void init_options(options_t *opts)
     opts->addr = "127.0.0.1";
     opts->port = BB_PORT_DEFAULT;
     opts->dev_index = 0;
-    opts->remote_slot = 0;
+    opts->remote_slot = -1;
     opts->slot = -1;
     opts->role = -1;
     opts->band = -1;
@@ -353,7 +351,7 @@ static int parse_slot_mac_arg(const char *text, int *slot, bb_mac_t *mac)
     }
 
     *comma = '\0';
-    if (parse_int_range(copy, 0, 255, "slot", slot)) {
+    if (parse_int_range(copy, 0, BB_SLOT_MAX - 1, "slot", slot)) {
         return -1;
     }
 
@@ -1240,8 +1238,6 @@ static int parse_options(int argc, char **argv, options_t *opts)
         OPT_PORT,
         OPT_INDEX,
         OPT_HELP,
-        OPT_REMOTE,
-        OPT_REMOTE_SLOT,
     };
 
     static const struct option long_options[] = {
@@ -1267,8 +1263,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
         {"port", required_argument, NULL, OPT_PORT},
         {"index", required_argument, NULL, OPT_INDEX},
         {"help", no_argument, NULL, OPT_HELP},
-        {"remote", no_argument, NULL, OPT_REMOTE},
-        {"remote-slot", required_argument, NULL, OPT_REMOTE_SLOT},
+        {"remote", optional_argument, NULL, 'R'},
         {NULL, 0, NULL, 0},
     };
 
@@ -1276,7 +1271,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
 
     init_options(opts);
 
-    while ((opt = getopt_long(argc, argv, "ha:p:i:Arms::bwfuR:M:S:B:W:F:U:DH", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "ha:p:i:Arms::bwfuR::M:S:B:W:F:U:DH", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
         case OPT_HELP:
@@ -1298,15 +1293,28 @@ static int parse_options(int argc, char **argv, options_t *opts)
                 return -1;
             }
             break;
-        case OPT_REMOTE:
-            opts->remote = 1;
-            break;
-        case OPT_REMOTE_SLOT:
-            if (parse_int_range(optarg, 0, 255, "remote slot", &opts->remote_slot)) {
+        case 'R': {
+            const char *slot_text = optarg;
+
+            if (opts->remote_slot >= 0) {
+                printf("-R/--remote may only be specified once\n");
                 return -1;
             }
-            opts->remote_slot_set = 1;
+            opts->remote_slot = BB_SLOT_0;
+            if (!slot_text && optind < argc &&
+                strcmp(argv[optind - 1], "-R") == 0 && argv[optind][0] != '-') {
+                slot_text = argv[optind++];
+            }
+            if (slot_text &&
+                parse_int_range(slot_text,
+                                BB_SLOT_0,
+                                BB_SLOT_MAX - 1,
+                                "remote slot",
+                                &opts->remote_slot)) {
+                return -1;
+            }
             break;
+        }
         case 'A':
         case OPT_GET_ALL:
             if (set_action(opts, ACTION_GET_ALL)) {
@@ -1334,7 +1342,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
             if (!optarg && optind < argc && argv[optind][0] != '-') {
                 optarg = argv[optind++];
             }
-            if (optarg && parse_int_range(optarg, 0, 255, "slot", &opts->slot)) {
+            if (optarg && parse_int_range(optarg, 0, BB_SLOT_MAX - 1, "slot", &opts->slot)) {
                 return -1;
             }
             break;
@@ -1367,7 +1375,6 @@ static int parse_options(int argc, char **argv, options_t *opts)
                 return -1;
             }
             break;
-        case 'R':
         case OPT_SET_ROLE:
             if (set_action(opts, ACTION_SET_ROLE) || parse_role(optarg, &opts->role)) {
                 return -1;
@@ -1438,11 +1445,6 @@ static int parse_options(int argc, char **argv, options_t *opts)
         return -1;
     }
 
-    if (opts->remote_slot_set && !opts->remote) {
-        printf("--remote-slot is only valid with --remote\n");
-        return -1;
-    }
-
     if (opts->reboot) {
         if (opts->action == ACTION_NONE) {
             opts->action = ACTION_REBOOT;
@@ -1470,7 +1472,7 @@ static int parse_options(int argc, char **argv, options_t *opts)
 
 static int run_action(bb_dev_handle_t *handle, const options_t *opts)
 {
-    int remote_slot = opts->remote ? opts->remote_slot : -1;
+    int remote_slot = opts->remote_slot;
 
     switch (opts->action) {
     case ACTION_GET_ALL:
@@ -1535,7 +1537,7 @@ int main(int argc, char **argv)
 
     ret = run_action(ctx.handle, &opts);
     if (!ret && opts.reboot && opts.action != ACTION_REBOOT) {
-        ret = reboot_device(ctx.handle, opts.remote ? opts.remote_slot : -1);
+        ret = reboot_device(ctx.handle, opts.remote_slot);
     }
 
     bb_demo_close(&ctx);

@@ -26,6 +26,7 @@ typedef enum {
     PRJ_CMD_SET_UART,
     PRJ_CMD_SET_PWR_EX,
     PRJ_CMD_SET_FREQ_POWER_LIMIT,
+    PRJ_CMD_SET_SOCK_ENCRYPT,
     PRJ_CMD_GET_BAND = 128,
     PRJ_CMD_GET_ROLE,
     PRJ_CMD_GET_AP_MAC,
@@ -42,6 +43,7 @@ typedef enum {
     PRJ_CMD_GET_UART,
     PRJ_CMD_GET_PWR_EX,
     PRJ_CMD_GET_FREQ_POWER_LIMIT,
+    PRJ_CMD_GET_SOCK_ENCRYPT,
     PRJ_CMD_EVENT_DEMO = 200,
     PRJ_CMD_EVENT_PAIR,
     PRJ_CMD_EVENT_PAIR_STOP,
@@ -220,6 +222,21 @@ typedef struct {
     uint8_t csma_offset;            /**<@note offset of csma */
 }prj_cmd_set_power_ex_t;
 typedef prj_cmd_set_power_ex_t prj_cmd_get_power_ex_t;
+
+typedef struct {
+    uint8_t slot;                   /** slot of the socket */
+    uint8_t port;                   /** port of the socket */
+    bb_sock_upd_enc_t   encrypt;    /** Encrypt params */
+}prj_cmd_set_sock_encrypt_t;
+
+typedef struct {
+    uint8_t slot;                   /** slot of the socket */
+    uint8_t port;                   /** port of the socket */
+} prj_cmd_get_sock_encrypt_in_t;
+
+typedef struct {
+    bb_sock_upd_enc_t   encrypt;    /** Encrypt params */
+} prj_cmd_get_sock_encrypt_out_t;
 
 void prj_rpc_init(void);
 

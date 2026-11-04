@@ -26,13 +26,13 @@
 远程导出对端 slot 0 配置文件：
 
 ```sh
-./l4_config_file -R -g peer_cfg.json
+./l4_config_file -R 0 -g peer_cfg.json
 ```
 
-远程导出指定 slot 的 flash 配置文件：
+远程导出对端 slot 0 的 flash 配置文件：
 
 ```sh
-./l4_config_file -R -S 1 -m flash -g peer_slot1_flash_cfg.json
+./l4_config_file -R 0 -m flash -g peer_slot0_flash_cfg.json
 ```
 
 ### 写入配置文件
@@ -46,7 +46,7 @@
 远程写入对端 slot 0 配置文件：
 
 ```sh
-./l4_config_file -R -s cfg.json
+./l4_config_file -R 0 -s cfg.json
 ```
 
 ### 恢复配置文件
@@ -60,7 +60,7 @@
 远程恢复对端 slot 0 配置文件：
 
 ```sh
-./l4_config_file -R -r
+./l4_config_file -R 0 -r
 ```
 
 ### 重启设备
@@ -81,7 +81,7 @@
 远程重启对端 slot 0：
 
 ```sh
-./l4_config_file -R -H
+./l4_config_file -R 0 -H
 ```
 
 ## 参数说明
@@ -95,12 +95,11 @@
 | `-s <file>` | 调用 `BB_SET_CFG`，把本地文件写入设备 |
 | `-r` | 调用 `BB_RESET_CFG`，恢复设备配置 |
 | `-H` | 单独重启设备，或在写入、恢复配置成功后重启设备 |
-| `-R` | 通过远程 ioctl 操作对端设备，默认 remote slot 为 `0` |
-| `-S <slot>` | 指定 `-R` 使用的 remote slot，默认 `0` |
+| `-R [slot]` | 通过远程 ioctl 操作对端设备，参数为 remote slot，默认 `0` |
 | `-m <mode>` | `BB_GET_CFG` 读取模式，支持 `auto`、`memory`、`flash` 或 `0`、`1`、`2` |
 | `-h` | 打印帮助信息 |
 
-程序要求 `-g`、`-s`、`-r` 三个配置动作最多只能指定一个，避免一次命令同时执行多个配置文件操作。`-H` 可以单独执行，也可以和 `-s`、`-r` 组合，但不能和 `-g` 组合；组合使用时仅在配置动作成功后重启。`-R` 只改变执行端，`-S` 只能和 `-R` 一起使用。
+程序要求 `-g`、`-s`、`-r` 三个配置动作最多只能指定一个，避免一次命令同时执行多个配置文件操作。`-H` 可以单独执行，也可以和 `-s`、`-r` 组合，但不能和 `-g` 组合；组合使用时仅在配置动作成功后重启。`-R` 只改变执行端并直接携带 remote slot。这里的 `-s <file>` 是写配置文件动作，不是 slot 参数。
 
 ## 输出日志格式
 

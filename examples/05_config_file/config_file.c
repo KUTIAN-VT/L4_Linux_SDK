@@ -22,8 +22,7 @@ static void usage(const char *prog)
     printf("  -s <file>       write config file with BB_SET_CFG\n");
     printf("  -r              reset config file with BB_RESET_CFG\n");
     printf("  -H              reboot device, or reboot after successful set/reset\n");
-    printf("  -R              operate peer device by remote ioctl, default remote slot: 0\n");
-    printf("  -S <slot>       remote slot id for -R, default: 0\n");
+    printf("  -R [slot]       operate peer device by remote ioctl, default remote slot: 0\n");
     printf("  -m <mode>       BB_GET_CFG mode: auto/memory/flash or 0/1/2, default: auto\n");
 }
 
@@ -477,15 +476,13 @@ int main(int argc, char **argv)
     int cfg_mode = 0;
     int do_reset = 0;
     int do_reboot = 0;
-    int remote = 0;
-    int remote_slot = 0;
-    int remote_slot_set = 0;
+    int remote_slot = -1;
     int action_count = 0;
     int opt;
     int ret;
     bb_demo_context_t ctx;
 
-    while ((opt = getopt(argc, argv, "ha:p:i:g:s:rHRS:m:")) != -1) {
+    while ((opt = getopt(argc, argv, "ha:p:i:g:s:rHR::m:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -518,15 +515,23 @@ int main(int argc, char **argv)
         case 'H':
             do_reboot = 1;
             break;
-        case 'R':
-            remote = 1;
-            break;
-        case 'S':
-            if (parse_int_range(optarg, 0, 255, "remote slot", &remote_slot)) {
+        case 'R': {
+            const char *slot_text = optarg;
+
+            if (remote_slot >= 0) {
+                printf("-R may only be specified once\n");
                 return -1;
             }
-            remote_slot_set = 1;
+            remote_slot = BB_SLOT_0;
+            if (!slot_text && optind < argc && argv[optind][0] != '-') {
+                slot_text = argv[optind++];
+            }
+            if (slot_text &&
+                parse_int_range(slot_text, 0, BB_SLOT_MAX - 1, "remote slot", &remote_slot)) {
+                return -1;
+            }
             break;
+        }
         case 'm':
             if (parse_cfg_mode(optarg, &cfg_mode)) {
                 return -1;
@@ -550,9 +555,8 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    if (remote_slot_set && !remote) {
-        printf("-S is only valid with -R\n");
-        usage(argv[0]);
+    if (optind < argc) {
+        printf("unexpected argument: %s\n", argv[optind]);
         return -1;
     }
 
@@ -568,17 +572,17 @@ int main(int argc, char **argv)
     }
 
     if (get_path) {
-        ret = dump_config_file(ctx.handle, get_path, cfg_mode, remote ? remote_slot : -1);
+        ret = dump_config_file(ctx.handle, get_path, cfg_mode, remote_slot);
     } else if (set_path) {
-        ret = set_config_file(ctx.handle, set_path, remote ? remote_slot : -1);
+        ret = set_config_file(ctx.handle, set_path, remote_slot);
     } else if (do_reset) {
-        ret = reset_config_file(ctx.handle, remote ? remote_slot : -1);
+        ret = reset_config_file(ctx.handle, remote_slot);
     } else {
-        ret = reboot_device(ctx.handle, remote ? remote_slot : -1);
+        ret = reboot_device(ctx.handle, remote_slot);
     }
 
     if (!ret && do_reboot && action_count != 0) {
-        ret = reboot_device(ctx.handle, remote ? remote_slot : -1);
+        ret = reboot_device(ctx.handle, remote_slot);
     }
 
     bb_demo_close(&ctx);

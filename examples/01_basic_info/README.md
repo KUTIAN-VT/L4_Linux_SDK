@@ -12,11 +12,12 @@
 | device | 8030 设备对象 | daemon 枚举到的可操作设备 |
 | index | 设备序号 | 当 daemon 管理多个设备时，用 `-i` 选择其中一个 |
 | sys info | 系统版本信息 | 通过 `BB_GET_SYS_INFO` 查询 |
+| boot reason | 最近一次重启原因 | 通过 `BB_GET_BOOT_REASON` 查询 |
 | status | 当前运行状态 | 通过 `BB_GET_STATUS` 查询 |
 | slot | 链路位置 | AP 侧可以有多个 slot，每个 slot 对应一个 DEV 链路 |
 | user phy | 用户物理层状态 | 每个数据用户的收发频点、带宽、MCS 等状态 |
 
-程序启动后会先连接 daemon，枚举当前设备列表，打开指定 index 的设备，然后按参数查询系统信息和运行状态。
+程序启动后会先连接 daemon，枚举当前设备列表，打开指定 index 的设备，然后按参数查询系统信息、重启原因和运行状态。
 
 ## 2. 这个程序能做什么
 
@@ -26,10 +27,11 @@
 | --- | --- |
 | `-S` | 查询 `BB_GET_STATUS`，打印角色、模式、MAC、slot 链路状态和 user phy 状态 |
 | `-V` | 查询 `BB_GET_SYS_INFO`，打印运行时间、编译时间和版本信息 |
-| `-A` | 查询全部基础信息，也就是同时执行 `-S` 和 `-V` |
-| `-R` | 通过远程 ioctl 查询 `-s <slot>` 指定对端的基础信息；可配合 `-S`、`-V` 或 `-A` 使用 |
+| `-B` | 查询 `BB_GET_BOOT_REASON`，打印最近一次重启的原因和诊断信息 |
+| `-A` | 查询全部基础信息，也就是同时执行 `-V`、`-B` 和 `-S` |
+| `-R [slot]` | 通过远程 ioctl 查询对端基础信息，remote slot 默认 `0`；可配合 `-S`、`-V`、`-B` 或 `-A` 使用 |
 
-如果不带 `-S`、`-V` 或 `-A`，程序默认执行 `-A`。
+如果不带 `-S`、`-V`、`-B` 或 `-A`，程序默认执行 `-A`。
 
 其它常用参数：
 
@@ -39,7 +41,6 @@
 | `-p <port>` | daemon 端口 | `BB_PORT_DEFAULT` |
 | `-i <index>` | 选择第几个设备 | `0` |
 | `-l` | 查看当前设备列表，不打开设备 | 无 |
-| `-s <slot>` | `-R` 远程查询使用的对端 slot；DEV 侧 slot 0 表示 AP | `0` |
 | `-h` | 打印帮助信息 | 无 |
 
 ## 3. 最常用的操作方式
@@ -56,7 +57,7 @@
 ./l4_basic_info -A
 ```
 
-程序会先查询系统版本信息，再查询当前设备状态。
+程序会依次查询系统版本信息、最近一次重启原因和当前设备状态。
 
 ### 只查询设备状态
 
@@ -74,19 +75,28 @@
 
 这会调用 `BB_GET_SYS_INFO`，用于查看设备运行时间、编译时间、软件版本、硬件版本和固件版本。
 
+### 只查询设备重启原因
+
+```sh
+./l4_basic_info -B
+```
+
+这会调用 `BB_GET_BOOT_REASON`，用于查看设备最近一次重启原因、异常地址、附加数据、重复次数和设备提供的描述。
+
 ### 远程查询对端基础信息
 
 ```sh
-./l4_basic_info -R -s 0
+./l4_basic_info -R 0
 ```
 
-`-R` 会把 `BB_GET_SYS_INFO` 和 `BB_GET_STATUS` 封装成 `BB_REMOTE_IOCTL_REQ`，通过 `-s <slot>` 指定的链路位置发给对端设备。不带 `-S`、`-V` 或 `-A` 时仍按默认动作查询全部基础信息。
+`-R [slot]` 会把 `BB_GET_SYS_INFO`、`BB_GET_BOOT_REASON` 和 `BB_GET_STATUS` 封装成 `BB_REMOTE_IOCTL_REQ`，并把参数写入外层远程请求的 `slot`。1v1 场景使用 `-R 0`；省略参数时也默认使用 remote slot 0。不带 `-S`、`-V`、`-B` 或 `-A` 时仍按默认动作查询全部基础信息。
 
 也可以只查询对端某一类信息：
 
 ```sh
-./l4_basic_info -R -s 0 -S
-./l4_basic_info -R -s 0 -V
+./l4_basic_info -R 0 -S
+./l4_basic_info -R 0 -V
+./l4_basic_info -R 0 -B
 ```
 
 ### 指定 daemon 地址和端口
@@ -103,7 +113,7 @@
 ./l4_basic_info -l
 ```
 
-`-l` 只连接 daemon 并打印当前枚举到的设备列表，不会打开设备，也不会查询系统信息或状态。看到列表后，可以根据 `device[index]` 选择要打开的设备：
+`-l` 只连接 daemon 并打印当前枚举到的设备列表，不会打开设备，也不会查询系统信息、重启原因或状态。看到列表后，可以根据 `device[index]` 选择要打开的设备：
 
 ```sh
 ./l4_basic_info -i 1
@@ -137,6 +147,8 @@
 打开指定 index 的设备
     |
 查询 BB_GET_SYS_INFO（本端；带 -R 时查询对端）
+    |
+查询 BB_GET_BOOT_REASON（本端；带 -R 时查询对端）
     |
 查询 BB_GET_STATUS（本端；带 -R 时查询对端）
     |
@@ -198,7 +210,38 @@ firmware_ver : x.x.x
 | `hardware_ver` | 硬件版本 |
 | `firmware_ver` | 固件版本 |
 
-### 第三步：查询设备状态
+### 第三步：查询设备重启原因
+
+当执行默认查询、`-A` 或 `-B` 时，程序会进入 `query_boot_reason()`：
+
+```c
+bb_ioctl(handle, BB_GET_BOOT_REASON, NULL, &reason);
+```
+
+输出示例：
+
+```text
+[BB_GET_BOOT_REASON]
+boot_reason : REBOOT (1)
+pc          : 0x00000000
+ra          : 0x00000000
+ex_data     : 0x00000000
+repeat_time : 1
+desc        : reboot
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `boot_reason` | 重启原因的可读名称和 SDK 原始枚举值 |
+| `pc` | crash 时的程序计数器地址 |
+| `ra` | crash 时的返回地址 |
+| `ex_data` | crash 时的附加诊断数据 |
+| `repeat_time` | 相同重启原因的重复次数 |
+| `desc` | 设备返回的重启原因描述，最多输出 64 字节 |
+
+无法识别的重启原因枚举会显示为 `UNKNOWN`，同时保留原始数值，方便兼容后续固件新增的原因类型。
+
+### 第四步：查询设备状态
 
 当执行默认查询、`-A` 或 `-S` 时，程序会进入 `query_status()`：
 
@@ -269,7 +312,7 @@ slot link status:
 
 ### user phy status
 
-程序会按当前设备角色把物理 user 重新映射成逻辑 RX/TX 方向，只读取对应方向的对象：AP 的 RX 使用 `BB_USER_0`，TX 使用 `BB_USER_BR_CS`；DEV 的 RX 使用 `BB_USER_BR_CS`，TX 使用 `BB_USER_0`。
+程序会按当前设备角色把物理 user 重新映射成逻辑 RX/TX 方向，只读取对应方向的对象：AP 的 RX 使用 `BB_USER_0`，TX 使用 `BB_USER_BR_CS`；DEV 的 RX 使用 `BB_USER_BR_CS`，TX 会先通过 `BB_GET_DEV_CONNECT_SLOT` 获取本机连接的 slot，再读取同编号 user 的 TX 状态（例如 slot 0 使用 `BB_USER_0`，slot 1 使用 `BB_USER_1`）。
 
 ```text
 user phy status:
@@ -288,11 +331,11 @@ user phy status:
 
 ### 默认执行的是完整查询
 
-不带参数时，程序会同时执行 `BB_GET_SYS_INFO` 和 `BB_GET_STATUS`。如果只想看某一类信息，使用 `-V` 或 `-S`。
+不带参数时，程序会依次执行 `BB_GET_SYS_INFO`、`BB_GET_BOOT_REASON` 和 `BB_GET_STATUS`。如果只想看某一类信息，使用 `-V`、`-B` 或 `-S`。
 
 ### `device index` 不是 slot
 
-`-i <index>` 选择的是 daemon 枚举到的第几个物理设备。`-s <slot>` 只在 `-R` 远程查询时使用，表示通过哪个链路位置访问对端。两者不是一回事。
+`-i <index>` 选择的是 daemon 枚举到的第几个物理设备，`-R [slot]` 选择远程调用使用的链路位置。基础信息命令自身没有目标 slot，因此本例程不提供 `-s <slot>`。
 
 ### 没有打印 slot 或 user 不一定是错误
 
@@ -302,9 +345,11 @@ user phy status:
 
 | 函数 | 做的事情 |
 | --- | --- |
-| `main()` | 解析参数、打开设备、按参数执行系统信息和状态查询 |
+| `main()` | 解析参数、打开设备、按参数执行系统信息、重启原因和状态查询 |
 | `query_sys_info()` | 调用 `BB_GET_SYS_INFO` 并打印版本信息；带 `-R` 时通过远程 ioctl 查询对端 |
+| `query_boot_reason()` | 调用 `BB_GET_BOOT_REASON` 并打印完整重启诊断信息；带 `-R` 时通过远程 ioctl 查询对端 |
 | `query_status()` | 调用 `BB_GET_STATUS` 并打印角色、模式、链路和物理层状态；带 `-R` 时通过远程 ioctl 查询对端 |
+| `boot_reason_name()` | 把重启原因枚举值转换成可读字符串，未知值显示为 `UNKNOWN` |
 | `basic_info_ioctl()` | 根据是否启用 `-R` 选择本地 `bb_ioctl()` 或 `BB_REMOTE_IOCTL_REQ` |
 | `role_name()` | 把角色枚举值转换成可读字符串 |
 | `mode_name()` | 把模式枚举值转换成可读字符串 |
@@ -316,4 +361,4 @@ user phy status:
 
 ## 8. 一句话总结
 
-`l4_basic_info` 做的事情就是：连接 daemon，打开指定 8030 设备，然后用 `BB_GET_SYS_INFO` 查询版本信息，用 `BB_GET_STATUS` 查询当前角色、模式、链路和物理层状态；带 `-R` 时通过指定 slot 远程查询对端的这些基础信息。
+`l4_basic_info` 做的事情就是：连接 daemon，打开指定 8030 设备，然后用 `BB_GET_SYS_INFO` 查询版本信息，用 `BB_GET_BOOT_REASON` 查询重启原因，用 `BB_GET_STATUS` 查询当前角色、模式、链路和物理层状态；带 `-R` 时通过指定 slot 远程查询对端的这些基础信息。

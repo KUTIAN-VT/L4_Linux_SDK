@@ -4,9 +4,14 @@
 
 本仓库当前维护的是整理后的 Linux SDK 内容。`build/` 和 `install/` 是构建、安装输出，不应作为源码维护。
 
+根目录 [`VERSION`](VERSION) 是 SDK 当前版本的唯一来源；各版本对应的功能变化见 [`CHANGELOG.md`](CHANGELOG.md)。
+
 > ## [版本变更记录](CHANGELOG.md)
 > ## [L4 Linux SDK 开发手册](docs/L4%20Linux%20SDK%20开发手册.md)
 > README 用于快速了解和最小验证；完整编译、部署、工具参数、API 示例和排错说明请阅读开发手册。
+>
+> ## [L4 通信加密应用手册](docs/L4通信加密应用手册.md)
+> 介绍 `l4_tuntap` 加密、Socket 实时加密对齐，以及通过项目 RPC 保存持久加密参数。
 
 ## 运行链路
 
@@ -74,9 +79,9 @@ install/arm64/
 | 客户端库 | `libar8030_client.so` | 用户程序链接的 SDK 动态库 |
 | 后台服务 | `l4_daemon` | 访问设备并为客户端程序提供 RPC 服务 |
 | 应用工具 | `l4_ota_upgrade` | 固件升级工具 |
-| 应用工具 | `l4_tuntap` | 网络透传工具 |
+| 应用工具 | `l4_tuntap` | 支持普通或加密 socket 的网络透传工具 |
 | 应用工具 | `l4_cmd_dbg` | 设备命令行调试工具 |
-| 示例程序 | `l4_basic_info` | 查询设备基础信息和版本信息 |
+| 示例程序 | `l4_basic_info` | 查询设备状态、版本信息和重启原因 |
 | 示例程序 | `l4_pair_manager` | 图传对频和配对管理 |
 | 示例程序 | `l4_link_monitor` | 链路状态、质量、吞吐、测距查询 |
 | 示例程序 | `l4_link_config` | 链路频段、信道、频宽、MCS 配置 |
@@ -84,6 +89,7 @@ install/arm64/
 | 示例程序 | `l4_minidb_config` | MiniDB 持久化配置读写 |
 | 示例程序 | `l4_uart_config` | UART 配置读写 |
 | 示例程序 | `l4_socket_transfer` | 普通或加密 Socket 数据收发 |
+| 示例程序 | `l4_socket_encrypt` | 查询或更新 Socket 运行态及 MiniDB 持久加密配置 |
 
 `examples/00_common` 是示例公共库，封装连接 daemon、枚举设备和打开设备的公共流程，不是可单独运行的示例程序。
 

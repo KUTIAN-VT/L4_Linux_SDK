@@ -59,6 +59,7 @@ static const BBIOCTL_TAB cmdtab[] = {
     { BB_GET_RECOVERY_MODE,             0,                                          sizeof(bb_get_recovery_mode_out_t)          },
     { BB_GET_DEV_CONNECT_SLOT,          0,                                          sizeof(bb_get_dev_connect_slot_out_t)       },
     { BB_GET_BANDWIDTH_MODE,            sizeof(bb_get_bandwidth_mode_in_t),         sizeof(bb_get_bandwidth_mode_out_t)         },
+    { BB_GET_SOCKET_ENCRYPT,            sizeof(bb_get_socket_enc_in_t),             sizeof(bb_get_socket_enc_out_t)             },
 
  // set
     { BB_SET_PAIR_MODE,         sizeof(bb_set_pair_mode_t),            0                                     },
